@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from .config import get_settings
-from .workbook_inspector import inspect_workbook, inspection_result_to_dict
+from .export_plan import save_reports
+from .workbook_inspector import inspect_workbook
 
 
 def ensure_directories(*paths: Path) -> None:
@@ -35,32 +35,32 @@ def main() -> None:
         stop_sheet_name=settings.stop_sheet_name,
     )
 
-    output_json = settings.temp_dir / "inspection_2A.json"
-    output_json.write_text(
-        json.dumps(inspection_result_to_dict(result), indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    json_path, txt_path = save_reports(result, settings.temp_dir)
 
     print("\n=== INSPECCIÓN DEL LIBRO ===")
     print(f"Libro: {result.workbook_name}")
     print(f"Total de hojas: {result.total_sheets}")
-    print(f"Hoja de corte configurada: {result.stop_sheet_configured}")
     print(f"Hoja de corte detectada: {result.detected_stop_sheet}")
     print(f"Hojas válidas para impresión: {result.printable_sheet_count}")
-    print(f"JSON generado en: {output_json}")
 
-    print("\n=== PRIMERAS HOJAS VÁLIDAS ===")
-    for item in result.sheet_reports[:15]:
-        print(
-            f"{item.index:>3}. {item.name} | tipo={item.kind} | "
-            f"filas={item.max_row} | columnas={item.max_column} | "
-            f"orientación={item.orientation} | print_area={item.print_area}"
-        )
+    print("\n=== RESUMEN POR TIPO ===")
+    for kind, count in sorted(result.summary_by_kind.items()):
+        print(f"- {kind}: {count}")
 
-    if result.excluded_sheet_names:
-        print("\n=== HOJAS EXCLUIDAS DESDE EL CORTE ===")
-        for name in result.excluded_sheet_names[:15]:
-            print(f"- {name}")
+    print("\n=== PRIMERAS HOJAS DE CALIFICACIONES DETECTADAS ===")
+    count = 0
+    for item in result.sheet_reports:
+        if item.kind == "calificaciones":
+            print(
+                f"{item.index:>3}. {item.name} | filas={item.max_row} | "
+                f"columnas={item.max_column} | orientación={item.orientation}"
+            )
+            count += 1
+            if count == 15:
+                break
+
+    print(f"\nJSON detallado: {json_path}")
+    print(f"Plan de impresión: {txt_path}")
 
 
 if __name__ == "__main__":

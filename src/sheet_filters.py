@@ -17,13 +17,6 @@ def normalize_text(value: str) -> str:
 
 
 def is_stop_sheet(sheet_name: str, configured_stop_name: str) -> bool:
-    """
-    Detecta la hoja de corte de manera flexible.
-    Soporta variaciones como:
-    - Reportes de Calificaciones
-    - Reporte de Calificaciones
-    - REPORTE CALIFICACI
-    """
     current = normalize_text(sheet_name)
     configured = normalize_text(configured_stop_name)
 
@@ -57,26 +50,65 @@ def find_stop_sheet(sheet_names: Iterable[str], configured_stop_name: str) -> Op
     return None
 
 
-def classify_sheet(sheet_name: str) -> str:
-    normalized = normalize_text(sheet_name)
+def is_student_data_sheet(sheet_name: str) -> bool:
+    n = normalize_text(sheet_name)
+    return "DATOS DEL ESTUDIANTE" in n
 
-    if "DATOS DEL CENTRO" in normalized:
+
+def is_center_data_sheet(sheet_name: str) -> bool:
+    n = normalize_text(sheet_name)
+    return "DATOS DEL CENTRO" in n
+
+
+def is_completivo_sheet(sheet_name: str) -> bool:
+    n = normalize_text(sheet_name)
+    return "COMPLETIVO" in n
+
+
+def is_extraordinario_sheet(sheet_name: str) -> bool:
+    n = normalize_text(sheet_name)
+    return "EXTRAORDINARIO" in n
+
+
+def is_acta_sheet(sheet_name: str) -> bool:
+    n = normalize_text(sheet_name)
+    return "ACTA" in n
+
+
+def is_attendance_sheet(sheet_name: str) -> bool:
+    n = normalize_text(sheet_name)
+    return "ASIT" in n or "ASIST" in n
+
+
+def looks_like_grade_sheet_by_name(sheet_name: str) -> bool:
+    """
+    Hojas como ALE216, MAT218, SOC220, etc.
+    Suelen ser hojas amplias con calificaciones.
+    """
+    n = normalize_text(sheet_name)
+    return bool(re.fullmatch(r"[A-ZÑ]{2,8}\d{2,5}", n))
+
+
+def classify_sheet(sheet_name: str) -> str:
+    if is_center_data_sheet(sheet_name):
         return "datos_centro"
 
-    if "DATOS DEL ESTUDIANTE" in normalized:
+    if is_student_data_sheet(sheet_name):
         return "datos_estudiante"
 
-    if "COMPLETIVO" in normalized:
-        return "completivo"
-
-    if "EXTRAORDINARIO" in normalized:
-        return "extraordinario"
-
-    if "ACTA" in normalized:
-        return "acta"
-
-    if "ASIST" in normalized:
+    if is_attendance_sheet(sheet_name):
         return "asistencia"
 
-    # Luego afinaremos esta clasificación con reglas más precisas
+    if is_completivo_sheet(sheet_name):
+        return "completivo"
+
+    if is_extraordinario_sheet(sheet_name):
+        return "extraordinario"
+
+    if is_acta_sheet(sheet_name):
+        return "acta"
+
+    if looks_like_grade_sheet_by_name(sheet_name):
+        return "calificaciones"
+
     return "general"
