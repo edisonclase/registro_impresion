@@ -1,0 +1,25 @@
+# entorno virtual
+.venv/
+
+# variables de entorno
+.env
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# logs
+logs/
+*.log
+
+# temporales
+data/temp/
+*.tmp
+
+# salidas generadas
+data/output/
+
+# vscode opcional
+.vscode/
