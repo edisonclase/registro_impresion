@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .config import get_settings
-from .export_plan import save_reports
-from .workbook_inspector import inspect_workbook
+from .print_setup import prepare_print_workbook
 
 
 def ensure_directories(*paths: Path) -> None:
@@ -30,37 +30,46 @@ def main() -> None:
     if not pdf_path.exists():
         raise FileNotFoundError(f"No se encontró el PDF de referencia: {pdf_path}")
 
-    result = inspect_workbook(
-        workbook_path=workbook_path,
-        stop_sheet_name=settings.stop_sheet_name,
+    output_workbook = settings.output_xlsx_dir / "2A_preparado_para_impresion.xlsx"
+
+    actions_log = prepare_print_workbook(
+        source_path=workbook_path,
+        output_path=output_workbook,
+        stop_sheet_name="REPORTE CALIFICACI",
     )
 
-    json_path, txt_path = save_reports(result, settings.temp_dir)
+    actions_json = settings.temp_dir / "2A_preparado_para_impresion_log.json"
+    actions_json.write_text(
+        json.dumps(
+            [
+                {
+                    "sheet_name": item.sheet_name,
+                    "detected_kind": item.detected_kind,
+                    "action_taken": item.action_taken,
+                }
+                for item in actions_log
+            ],
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
-    print("\n=== INSPECCIÓN DEL LIBRO ===")
-    print(f"Libro: {result.workbook_name}")
-    print(f"Total de hojas: {result.total_sheets}")
-    print(f"Hoja de corte detectada: {result.detected_stop_sheet}")
-    print(f"Hojas válidas para impresión: {result.printable_sheet_count}")
+    print("\n=== COPIA DE TRABAJO GENERADA ===")
+    print(f"Archivo generado: {output_workbook}")
 
-    print("\n=== RESUMEN POR TIPO ===")
-    for kind, count in sorted(result.summary_by_kind.items()):
-        print(f"- {kind}: {count}")
-
-    print("\n=== PRIMERAS HOJAS DE CALIFICACIONES DETECTADAS ===")
-    count = 0
-    for item in result.sheet_reports:
-        if item.kind == "calificaciones":
-            print(
-                f"{item.index:>3}. {item.name} | filas={item.max_row} | "
-                f"columnas={item.max_column} | orientación={item.orientation}"
-            )
-            count += 1
-            if count == 15:
+    print("\n=== PRIMERAS ACCIONES APLICADAS ===")
+    shown = 0
+    for item in actions_log:
+        if item.detected_kind in {"competencias", "asistencia_asignatura", "datos_estudiante", "datos_centro"}:
+            print(f"- {item.sheet_name} | tipo={item.detected_kind}")
+            for action in item.action_taken:
+                print(f"    * {action}")
+            shown += 1
+            if shown >= 12:
                 break
 
-    print(f"\nJSON detallado: {json_path}")
-    print(f"Plan de impresión: {txt_path}")
+    print(f"\nLog generado: {actions_json}")
 
 
 if __name__ == "__main__":
