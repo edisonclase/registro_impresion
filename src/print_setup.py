@@ -27,7 +27,11 @@ THIN_BLACK_BORDER = Border(
     bottom=THIN_BLACK_SIDE,
 )
 
-WHITE_FILL = PatternFill(fill_type="solid", fgColor="FFFFFFFF")
+WHITE_FILL = PatternFill(
+    fill_type="solid",
+    fgColor="FFFFFFFF",
+    bgColor="FFFFFFFF",
+)
 
 
 def cell_text(value) -> str:
@@ -41,63 +45,59 @@ def safe_last_col_letter(ws: Worksheet) -> str:
     return get_column_letter(max_col)
 
 
-def is_red_like(rgb: Optional[str]) -> bool:
-    if not rgb:
-        return False
-
-    rgb = str(rgb).upper()
-    if len(rgb) == 8:
-        rgb = rgb[-6:]
-
-    red_like = {
-        "FF0000",
-        "C00000",
-        "9C0006",
-        "FF6666",
-        "E26B0A",
-    }
-    return rgb in red_like
-
-
 def font_to_times_new_roman_black(original_font: Font) -> Font:
+    """
+    Fuerza fuente Times New Roman 12 en negro,
+    sin depender del tipo previo de color.
+    """
     font_copy = copy(original_font)
     font_copy.name = "Times New Roman"
     font_copy.size = 12
-    if getattr(font_copy, "color", None) is not None:
-        try:
-            if getattr(font_copy.color, "type", None) == "rgb":
-                font_copy.color.rgb = "FF000000"
-            else:
-                font_copy.color = "FF000000"
-        except Exception:
-            font_copy.color = "FF000000"
-    else:
-        font_copy.color = "FF000000"
+    font_copy.color = "FF000000"
     return font_copy
 
 
-def normalize_cell_visual_style(cell) -> None:
+def white_fill() -> PatternFill:
+    return copy(WHITE_FILL)
+
+
+def normalize_cell_visual_style(cell) -> tuple[bool, bool]:
     """
     Reglas visuales globales:
     - Times New Roman 12
     - texto/números en negro
-    - rellenos de color a blanco
+    - rellenos a blanco
     """
+    font_changed = False
+    fill_changed = False
+
+    # Forzar fuente
     try:
         cell.font = font_to_times_new_roman_black(cell.font)
+        font_changed = True
     except Exception:
         pass
 
+    # Forzar relleno blanco siempre que exista estilo de relleno
     try:
         fill = cell.fill
         fill_type = getattr(fill, "fill_type", None)
         fg_rgb = getattr(getattr(fill, "fgColor", None), "rgb", None)
+        bg_rgb = getattr(getattr(fill, "bgColor", None), "rgb", None)
 
-        if fill_type == "solid":
-            if fg_rgb and str(fg_rgb).upper() not in {"FFFFFFFF", "00FFFFFF"}:
-                cell.fill = copy(WHITE_FILL)
+        has_colored_fill = (
+            fill_type is not None
+            or fg_rgb not in (None, "00000000", "00FFFFFF", "FFFFFFFF")
+            or bg_rgb not in (None, "00000000", "00FFFFFF", "FFFFFFFF")
+        )
+
+        if has_colored_fill:
+            cell.fill = white_fill()
+            fill_changed = True
     except Exception:
         pass
+
+    return font_changed, fill_changed
 
 
 def normalize_sheet_visual_style(ws: Worksheet) -> list[str]:
@@ -109,39 +109,18 @@ def normalize_sheet_visual_style(ws: Worksheet) -> list[str]:
             if cell is None:
                 continue
 
-            before_fill = None
-            try:
-                if cell.fill and cell.fill.fill_type == "solid":
-                    before_fill = getattr(cell.fill.fgColor, "rgb", None)
-            except Exception:
-                before_fill = None
+            font_changed, fill_changed = normalize_cell_visual_style(cell)
 
-            before_font_rgb = None
-            try:
-                if cell.font and cell.font.color and cell.font.color.type == "rgb":
-                    before_font_rgb = cell.font.color.rgb
-            except Exception:
-                before_font_rgb = None
+            if font_changed:
+                changed_font_count += 1
+            if fill_changed:
+                changed_fill_count += 1
 
-            normalize_cell_visual_style(cell)
-
-            try:
-                if before_fill and str(before_fill).upper() not in {"FFFFFFFF", "00FFFFFF"}:
-                    changed_fill_count += 1
-            except Exception:
-                pass
-
-            try:
-                if before_font_rgb and str(before_font_rgb).upper() != "FF000000":
-                    changed_font_count += 1
-            except Exception:
-                pass
-
-    notes = ["fuente global ajustada a Times New Roman 12 y color negro"]
+    notes = ["fuente global forzada a Times New Roman 12 y color negro"]
     if changed_fill_count:
-        notes.append(f"rellenos de color cambiados a blanco: {changed_fill_count}")
+        notes.append(f"rellenos forzados a blanco: {changed_fill_count}")
     if changed_font_count:
-        notes.append(f"fuentes de color ajustadas a negro: {changed_font_count}")
+        notes.append(f"fuentes forzadas a negro: {changed_font_count}")
     return notes
 
 
@@ -151,10 +130,6 @@ def autosize_columns_by_content(
     min_width: float = 8.5,
     max_width: float = 45.0,
 ) -> list[str]:
-    """
-    Ajusta ancho de columnas según contenido visible.
-    Conservador para no deformar demasiado las hojas.
-    """
     changed = 0
 
     for col_idx in range(1, ws.max_column + 1):
@@ -187,9 +162,6 @@ def autosize_columns_by_content(
 
 
 def complete_used_range_borders(ws: Worksheet) -> list[str]:
-    """
-    Para hojas ECAP: completa la cuadrícula en el rango usado.
-    """
     applied = 0
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
         for cell in row:
@@ -218,8 +190,6 @@ def detect_sheet_kind_by_content(ws: Worksheet) -> str:
     c6 = cell_text(ws["C6"].value)
 
     row4 = " | ".join(cell_text(ws.cell(4, c).value) for c in range(1, min(ws.max_column, 12) + 1))
-    row5 = " | ".join(cell_text(ws.cell(5, c).value) for c in range(1, min(ws.max_column, 12) + 1))
-    row6 = " | ".join(cell_text(ws.cell(6, c).value) for c in range(1, min(ws.max_column, 12) + 1))
 
     if "DATOS DEL CENTRO" in b1:
         return "datos_centro"
@@ -299,7 +269,6 @@ def configure_cf_sheet_for_print(ws: Worksheet) -> list[str]:
     actions.append("orientación vertical en carta")
     actions.append("ajuste a 1 página de ancho")
 
-    # CF: A=RNE, B=ID, C=No., D=Nombre
     ws.column_dimensions["B"].hidden = True
     ws.column_dimensions["D"].hidden = True
     actions.append("columnas B y D ocultas para no imprimir ID ni nombre")
@@ -321,11 +290,9 @@ def configure_attendance_sheet_for_print(ws: Worksheet) -> list[str]:
     actions.append("orientación vertical en carta")
     actions.append("ajuste a 1 página de ancho")
 
-    # Primer bloque
     for col in ["A", "C", "AA", "AB", "AC", "AD"]:
         ws.column_dimensions[col].hidden = True
 
-    # Segundo bloque
     for col in ["AF", "BD", "BE", "BF", "BG"]:
         ws.column_dimensions[col].hidden = True
 
@@ -409,8 +376,6 @@ def prepare_print_workbook(
             actions.extend(configure_ecap_sheet_for_print(ws))
         elif kind == "asistencia_asignatura":
             actions.extend(configure_attendance_sheet_for_print(ws))
-        elif kind in {"datos_centro", "datos_estudiante", "completivo", "extraordinario", "general"}:
-            actions.extend(configure_text_sheet_for_print(ws))
         else:
             actions.extend(configure_text_sheet_for_print(ws))
 
