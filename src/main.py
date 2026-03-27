@@ -30,7 +30,7 @@ def main() -> None:
     if not pdf_path.exists():
         raise FileNotFoundError(f"No se encontró el PDF de referencia: {pdf_path}")
 
-    output_workbook = settings.output_xlsx_dir / "2A_preparado_para_impresion_v3.xlsx"
+    output_workbook = settings.output_xlsx_dir / "2A_preparado_para_impresion_v4.xlsx"
 
     actions_log = prepare_print_workbook(
         source_path=workbook_path,
@@ -38,7 +38,7 @@ def main() -> None:
         stop_sheet_name=settings.stop_sheet_name,
     )
 
-    actions_json = settings.temp_dir / "2A_preparado_para_impresion_v3_log.json"
+    actions_json = settings.temp_dir / "2A_preparado_para_impresion_v4_log.json"
     actions_json.write_text(
         json.dumps(
             [
@@ -70,7 +70,7 @@ def main() -> None:
             "datos_centro",
         }:
             print(f"- {item.sheet_name} | tipo={item.detected_kind}")
-            for action in item.action_taken[:10]:
+            for action in item.action_taken[:12]:
                 print(f"    * {action}")
             shown += 1
             if shown >= 14:

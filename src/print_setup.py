@@ -40,17 +40,7 @@ def cell_text(value) -> str:
     return str(value).strip().upper()
 
 
-def safe_last_col_letter(ws: Worksheet) -> str:
-    max_col = max(1, ws.max_column or 1)
-    return get_column_letter(max_col)
-
-
 def clear_conditional_formatting(ws: Worksheet) -> list[str]:
-    """
-    Elimina reglas de formato condicional.
-    Esto es importante porque Google Sheets / Excel online pueden
-    volver a pintar celdas en rojo aunque el fill y la fuente ya hayan sido cambiados.
-    """
     removed = 0
 
     try:
@@ -69,9 +59,6 @@ def clear_conditional_formatting(ws: Worksheet) -> list[str]:
 
 
 def font_to_times_new_roman_black(original_font: Font) -> Font:
-    """
-    Fuerza fuente Times New Roman 12 en negro.
-    """
     font_copy = copy(original_font)
     font_copy.name = "Times New Roman"
     font_copy.size = 12
@@ -84,12 +71,6 @@ def white_fill() -> PatternFill:
 
 
 def normalize_cell_visual_style(cell) -> tuple[bool, bool]:
-    """
-    Reglas visuales globales:
-    - Times New Roman 12
-    - texto/números en negro
-    - rellenos a blanco
-    """
     font_changed = False
     fill_changed = False
 
@@ -144,15 +125,59 @@ def normalize_sheet_visual_style(ws: Worksheet) -> list[str]:
     return notes
 
 
+def is_row_hidden(ws: Worksheet, row_idx: int) -> bool:
+    return bool(ws.row_dimensions[row_idx].hidden)
+
+
+def is_col_hidden(ws: Worksheet, col_idx: int) -> bool:
+    col_letter = get_column_letter(col_idx)
+    return bool(ws.column_dimensions[col_letter].hidden)
+
+
+def get_used_range_visible_bounds(ws: Worksheet) -> tuple[int, int]:
+    """
+    Busca el último renglón y columna con contenido real.
+    Ayuda a no arrastrar columnas auxiliares vacías al print_area.
+    """
+    last_row = 1
+    last_col = 1
+
+    for row_idx in range(1, ws.max_row + 1):
+        row_has_data = False
+        for col_idx in range(1, ws.max_column + 1):
+            value = ws.cell(row=row_idx, column=col_idx).value
+            if value not in (None, ""):
+                row_has_data = True
+                last_col = max(last_col, col_idx)
+        if row_has_data:
+            last_row = row_idx
+
+    return max(1, last_row), max(1, last_col)
+
+
+def set_print_area_used_range(ws: Worksheet) -> str:
+    last_row, last_col = get_used_range_visible_bounds(ws)
+    last_col_letter = get_column_letter(last_col)
+    ws.print_area = f"A1:{last_col_letter}{last_row}"
+    return f"A1:{last_col_letter}{last_row}"
+
+
 def autosize_columns_by_content(
     ws: Worksheet,
     *,
     min_width: float = 8.5,
     max_width: float = 45.0,
 ) -> list[str]:
+    """
+    Ajusta solo columnas visibles.
+    No modifica columnas ocultas.
+    """
     changed = 0
 
     for col_idx in range(1, ws.max_column + 1):
+        if is_col_hidden(ws, col_idx):
+            continue
+
         col_letter = get_column_letter(col_idx)
         max_len = 0
 
@@ -178,12 +203,110 @@ def autosize_columns_by_content(
             ws.column_dimensions[col_letter].width = proposed
             changed += 1
 
-    return [f"ancho de columnas ajustado según contenido: {changed} columnas"]
+    return [f"ancho de columnas visibles ajustado según contenido: {changed} columnas"]
+
+
+def estimate_text_lines(text: str, width_units: float) -> int:
+    if not text:
+        return 1
+
+    width_units = max(width_units, 6.0)
+    approx_chars_per_line = max(6, int(width_units * 1.15))
+    return max(1, (len(text) // approx_chars_per_line) + (1 if len(text) % approx_chars_per_line else 0))
+
+
+def preserve_and_adjust_row_heights(
+    ws: Worksheet,
+    *,
+    min_height: float = 18.0,
+    wrapped_min_height: float = 24.0,
+    rotated_min_height: float = 42.0,
+    max_height: float = 96.0,
+    max_scan_header_cols: int | None = None,
+) -> list[str]:
+    """
+    Conserva alturas existentes y las aumenta solo cuando hace falta.
+    Protege texto largo, wrap_text y texto vertical/rotado.
+    No toca filas ocultas.
+    """
+    changed_rows = 0
+    rotated_rows = 0
+    wrapped_rows = 0
+
+    last_row, last_col = get_used_range_visible_bounds(ws)
+    scan_cols = min(last_col, max_scan_header_cols) if max_scan_header_cols else last_col
+
+    for row_idx in range(1, last_row + 1):
+        if is_row_hidden(ws, row_idx):
+            continue
+
+        row_dim = ws.row_dimensions[row_idx]
+        current_height = row_dim.height if row_dim.height is not None else 15.0
+        target_height = max(current_height, min_height)
+
+        found_wrapped = False
+        found_rotated = False
+
+        for col_idx in range(1, scan_cols + 1):
+            if is_col_hidden(ws, col_idx):
+                continue
+
+            cell = ws.cell(row=row_idx, column=col_idx)
+            value = cell.value
+            if value in (None, ""):
+                continue
+
+            text = str(value).strip()
+            if not text:
+                continue
+
+            alignment = cell.alignment
+            rotation = getattr(alignment, "textRotation", 0) or 0
+            wrap_text = bool(getattr(alignment, "wrapText", False))
+
+            col_letter = get_column_letter(col_idx)
+            width = ws.column_dimensions[col_letter].width
+            if width is None:
+                width = 8.43
+
+            if rotation not in (0, None):
+                found_rotated = True
+                target_height = max(target_height, rotated_min_height)
+
+                if len(text) > 6:
+                    extra = min(max_height, rotated_min_height + (len(text) * 1.2))
+                    target_height = max(target_height, extra)
+
+            if wrap_text or len(text) > max(12, int(width * 1.3)):
+                found_wrapped = True
+                lines = estimate_text_lines(text, width)
+                estimated_height = min(max_height, wrapped_min_height + ((lines - 1) * 12))
+                target_height = max(target_height, estimated_height)
+
+        target_height = min(max_height, target_height)
+
+        if target_height > current_height + 0.1:
+            row_dim.height = target_height
+            changed_rows += 1
+
+        if found_rotated:
+            rotated_rows += 1
+        if found_wrapped:
+            wrapped_rows += 1
+
+    notes = [f"alturas de fila ajustadas conservando valores originales: {changed_rows} filas"]
+    if rotated_rows:
+        notes.append(f"filas con texto vertical/rotado protegidas: {rotated_rows}")
+    if wrapped_rows:
+        notes.append(f"filas con texto largo o envuelto protegidas: {wrapped_rows}")
+    return notes
 
 
 def complete_used_range_borders(ws: Worksheet) -> list[str]:
     applied = 0
-    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+    last_row, last_col = get_used_range_visible_bounds(ws)
+
+    for row in ws.iter_rows(min_row=1, max_row=last_row, min_col=1, max_col=last_col):
         for cell in row:
             if cell is None:
                 continue
@@ -256,29 +379,7 @@ def set_common_page_setup_letter_portrait(ws: Worksheet) -> None:
     ws.print_options.verticalCentered = False
 
 
-def set_print_area_full_used_range(ws: Worksheet) -> str:
-    last_col_letter = safe_last_col_letter(ws)
-    ws.print_area = f"A1:{last_col_letter}{ws.max_row}"
-    return f"A1:{last_col_letter}{ws.max_row}"
-
-
-def column_has_header_text(ws: Worksheet, col_idx: int, texts: set[str], max_header_row: int = 8) -> bool:
-    normalized_targets = {t.replace(" ", "") for t in texts}
-
-    for row_idx in range(1, min(ws.max_row, max_header_row) + 1):
-        value = ws.cell(row=row_idx, column=col_idx).value
-        text = cell_text(value)
-        compact = text.replace(" ", "")
-        if text in texts or compact in normalized_targets:
-            return True
-    return False
-
-
 def find_cf_attendance_columns(ws: Worksheet, max_header_row: int = 8) -> tuple[list[int], list[int]]:
-    """
-    Detecta en hojas CF las columnas del bloque ASISTENCIA.
-    Debe dejar visible solo la columna % ANUAL / %ANUAL.
-    """
     attendance_cols: list[int] = []
     annual_cols: list[int] = []
 
@@ -322,52 +423,26 @@ def find_cf_attendance_columns(ws: Worksheet, max_header_row: int = 8) -> tuple[
 
 def hide_cf_attendance_details_except_annual(ws: Worksheet) -> list[str]:
     """
-    En CF deja visible solo la columna % ANUAL del bloque de asistencia.
-    Mantiene visible el encabezado general ASISTENCIA porque está en celdas combinadas,
-    pero oculta las columnas P1, P2, P3 y P4.
+    Regla fija para hojas CF del formato actual:
+    en el bloque ASISTENCIA se dejan ocultas J:M
+    y se deja visible N (% ANUAL).
     """
     actions: list[str] = []
 
-    attendance_cols, annual_cols = find_cf_attendance_columns(ws)
-
-    if not attendance_cols:
-        return ["no se detectó bloque de asistencia en hoja CF"]
-
-    if not annual_cols:
-        return ["se detectó bloque de asistencia, pero no se encontró columna % ANUAL"]
-
-    annual_set = set(annual_cols)
+    cols_to_hide = ["J", "K", "L", "M"]
     hidden_count = 0
 
-    for col_idx in attendance_cols:
-        if col_idx not in annual_set:
-            col_letter = get_column_letter(col_idx)
+    for col_letter in cols_to_hide:
+        if ws.max_column >= ws[col_letter + "1"].column:
             ws.column_dimensions[col_letter].hidden = True
             hidden_count += 1
 
-    visible_letters = [get_column_letter(c) for c in annual_cols]
-    actions.append(f"bloque de asistencia depurado en CF: {hidden_count} columnas ocultas")
-    actions.append(f"columna(s) % ANUAL visibles: {', '.join(visible_letters)}")
-    return actions
+    # asegurar que N quede visible
+    if ws.max_column >= ws["N1"].column:
+        ws.column_dimensions["N"].hidden = False
+        actions.append("columna N (% ANUAL) forzada visible")
 
-
-def configure_competency_sheet_for_print(ws: Worksheet) -> list[str]:
-    actions: list[str] = []
-
-    set_common_page_setup_letter_portrait(ws)
-    actions.append("orientación vertical en carta")
-    actions.append("ajuste a 1 página de ancho")
-
-    ws.column_dimensions["B"].hidden = True
-    actions.append("columna B oculta para no imprimir nombres")
-
-    print_area = set_print_area_full_used_range(ws)
-    actions.append(f"área de impresión definida: {print_area}")
-
-    ws.print_title_rows = "$1:$4"
-    actions.append("filas 1 a 4 repetidas como encabezado")
-
-    actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=30.0))
+    actions.append(f"bloque de asistencia CF ajustado manualmente: {hidden_count} columnas ocultas (J:M)")
     return actions
 
 
@@ -384,13 +459,22 @@ def configure_cf_sheet_for_print(ws: Worksheet) -> list[str]:
 
     actions.extend(hide_cf_attendance_details_except_annual(ws))
 
-    print_area = set_print_area_full_used_range(ws)
+    print_area = set_print_area_used_range(ws)
     actions.append(f"área de impresión definida: {print_area}")
 
     ws.print_title_rows = "$1:$6"
     actions.append("filas 1 a 6 repetidas como encabezado")
 
     actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=24.0))
+    actions.extend(
+        preserve_and_adjust_row_heights(
+            ws,
+            min_height=18.0,
+            wrapped_min_height=24.0,
+            rotated_min_height=44.0,
+            max_height=110.0,
+        )
+    )
     return actions
 
 
@@ -409,13 +493,22 @@ def configure_attendance_sheet_for_print(ws: Worksheet) -> list[str]:
 
     actions.append("columnas ocultas en asistencia: ID, nombre, TA, %A, TE, %E")
 
-    print_area = set_print_area_full_used_range(ws)
+    print_area = set_print_area_used_range(ws)
     actions.append(f"área de impresión definida: {print_area}")
 
     ws.print_title_rows = "$1:$6"
     actions.append("filas 1 a 6 repetidas como encabezado")
 
     actions.extend(autosize_columns_by_content(ws, min_width=4.5, max_width=18.0))
+    actions.extend(
+        preserve_and_adjust_row_heights(
+            ws,
+            min_height=18.0,
+            wrapped_min_height=24.0,
+            rotated_min_height=44.0,
+            max_height=110.0,
+        )
+    )
     return actions
 
 
@@ -424,10 +517,19 @@ def configure_text_sheet_for_print(ws: Worksheet) -> list[str]:
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
 
-    print_area = set_print_area_full_used_range(ws)
+    print_area = set_print_area_used_range(ws)
     actions.append(f"área de impresión definida: {print_area}")
 
     actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=28.0))
+    actions.extend(
+        preserve_and_adjust_row_heights(
+            ws,
+            min_height=20.0,
+            wrapped_min_height=28.0,
+            rotated_min_height=48.0,
+            max_height=120.0,
+        )
+    )
     return actions
 
 
@@ -436,11 +538,20 @@ def configure_ecap_sheet_for_print(ws: Worksheet) -> list[str]:
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
 
-    print_area = set_print_area_full_used_range(ws)
+    print_area = set_print_area_used_range(ws)
     actions.append(f"área de impresión definida: {print_area}")
 
     actions.extend(complete_used_range_borders(ws))
     actions.extend(autosize_columns_by_content(ws, min_width=12.0, max_width=42.0))
+    actions.extend(
+        preserve_and_adjust_row_heights(
+            ws,
+            min_height=18.0,
+            wrapped_min_height=24.0,
+            rotated_min_height=44.0,
+            max_height=96.0,
+        )
+    )
     return actions
 
 
