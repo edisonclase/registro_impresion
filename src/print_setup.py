@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from copy import copy
+
 from openpyxl import load_workbook
+from openpyxl.styles import Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -16,6 +19,17 @@ class SheetPrintAction:
     action_taken: list[str]
 
 
+THIN_BLACK_SIDE = Side(style="thin", color="FF000000")
+THIN_BLACK_BORDER = Border(
+    left=THIN_BLACK_SIDE,
+    right=THIN_BLACK_SIDE,
+    top=THIN_BLACK_SIDE,
+    bottom=THIN_BLACK_SIDE,
+)
+
+WHITE_FILL = PatternFill(fill_type="solid", fgColor="FFFFFFFF")
+
+
 def cell_text(value) -> str:
     if value is None:
         return ""
@@ -23,19 +37,176 @@ def cell_text(value) -> str:
 
 
 def safe_last_col_letter(ws: Worksheet) -> str:
-    """
-    Devuelve la letra de la última columna usada sin depender
-    de una celda concreta, evitando errores con MergedCell.
-    """
     max_col = max(1, ws.max_column or 1)
     return get_column_letter(max_col)
 
 
+def is_red_like(rgb: Optional[str]) -> bool:
+    if not rgb:
+        return False
+
+    rgb = str(rgb).upper()
+    if len(rgb) == 8:
+        rgb = rgb[-6:]
+
+    red_like = {
+        "FF0000",
+        "C00000",
+        "9C0006",
+        "FF6666",
+        "E26B0A",
+    }
+    return rgb in red_like
+
+
+def font_to_times_new_roman_black(original_font: Font) -> Font:
+    font_copy = copy(original_font)
+    font_copy.name = "Times New Roman"
+    font_copy.size = 12
+    if getattr(font_copy, "color", None) is not None:
+        try:
+            if getattr(font_copy.color, "type", None) == "rgb":
+                font_copy.color.rgb = "FF000000"
+            else:
+                font_copy.color = "FF000000"
+        except Exception:
+            font_copy.color = "FF000000"
+    else:
+        font_copy.color = "FF000000"
+    return font_copy
+
+
+def normalize_cell_visual_style(cell) -> None:
+    """
+    Reglas visuales globales:
+    - Times New Roman 12
+    - texto/números en negro
+    - rellenos de color a blanco
+    """
+    try:
+        cell.font = font_to_times_new_roman_black(cell.font)
+    except Exception:
+        pass
+
+    try:
+        fill = cell.fill
+        fill_type = getattr(fill, "fill_type", None)
+        fg_rgb = getattr(getattr(fill, "fgColor", None), "rgb", None)
+
+        if fill_type == "solid":
+            if fg_rgb and str(fg_rgb).upper() not in {"FFFFFFFF", "00FFFFFF"}:
+                cell.fill = copy(WHITE_FILL)
+    except Exception:
+        pass
+
+
+def normalize_sheet_visual_style(ws: Worksheet) -> list[str]:
+    changed_fill_count = 0
+    changed_font_count = 0
+
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell is None:
+                continue
+
+            before_fill = None
+            try:
+                if cell.fill and cell.fill.fill_type == "solid":
+                    before_fill = getattr(cell.fill.fgColor, "rgb", None)
+            except Exception:
+                before_fill = None
+
+            before_font_rgb = None
+            try:
+                if cell.font and cell.font.color and cell.font.color.type == "rgb":
+                    before_font_rgb = cell.font.color.rgb
+            except Exception:
+                before_font_rgb = None
+
+            normalize_cell_visual_style(cell)
+
+            try:
+                if before_fill and str(before_fill).upper() not in {"FFFFFFFF", "00FFFFFF"}:
+                    changed_fill_count += 1
+            except Exception:
+                pass
+
+            try:
+                if before_font_rgb and str(before_font_rgb).upper() != "FF000000":
+                    changed_font_count += 1
+            except Exception:
+                pass
+
+    notes = ["fuente global ajustada a Times New Roman 12 y color negro"]
+    if changed_fill_count:
+        notes.append(f"rellenos de color cambiados a blanco: {changed_fill_count}")
+    if changed_font_count:
+        notes.append(f"fuentes de color ajustadas a negro: {changed_font_count}")
+    return notes
+
+
+def autosize_columns_by_content(
+    ws: Worksheet,
+    *,
+    min_width: float = 8.5,
+    max_width: float = 45.0,
+) -> list[str]:
+    """
+    Ajusta ancho de columnas según contenido visible.
+    Conservador para no deformar demasiado las hojas.
+    """
+    changed = 0
+
+    for col_idx in range(1, ws.max_column + 1):
+        col_letter = get_column_letter(col_idx)
+        max_len = 0
+
+        for row_idx in range(1, ws.max_row + 1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            value = cell.value
+            if value is None:
+                continue
+
+            text = str(value).replace("\n", " ").strip()
+            if not text:
+                continue
+
+            max_len = max(max_len, len(text))
+
+        if max_len == 0:
+            continue
+
+        proposed = min(max(min_width, max_len * 0.95), max_width)
+
+        current_width = ws.column_dimensions[col_letter].width
+        if current_width is None or proposed > current_width:
+            ws.column_dimensions[col_letter].width = proposed
+            changed += 1
+
+    return [f"ancho de columnas ajustado según contenido: {changed} columnas"]
+
+
+def complete_used_range_borders(ws: Worksheet) -> list[str]:
+    """
+    Para hojas ECAP: completa la cuadrícula en el rango usado.
+    """
+    applied = 0
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+        for cell in row:
+            if cell is None:
+                continue
+            try:
+                cell.border = copy(THIN_BLACK_BORDER)
+                applied += 1
+            except Exception:
+                pass
+
+    return [f"bordes completos aplicados en rango usado: {applied} celdas"]
+
+
 def detect_sheet_kind_by_content(ws: Worksheet) -> str:
-    """
-    Detecta el tipo de hoja usando el contenido visible,
-    no solo el nombre de la pestaña.
-    """
+    title = cell_text(ws.title)
+
     a1 = cell_text(ws["A1"].value)
     b1 = cell_text(ws["B1"].value)
     d1 = cell_text(ws["D1"].value)
@@ -46,20 +217,27 @@ def detect_sheet_kind_by_content(ws: Worksheet) -> str:
     d4 = cell_text(ws["D4"].value)
     c6 = cell_text(ws["C6"].value)
 
+    row4 = " | ".join(cell_text(ws.cell(4, c).value) for c in range(1, min(ws.max_column, 12) + 1))
+    row5 = " | ".join(cell_text(ws.cell(5, c).value) for c in range(1, min(ws.max_column, 12) + 1))
+    row6 = " | ".join(cell_text(ws.cell(6, c).value) for c in range(1, min(ws.max_column, 12) + 1))
+
     if "DATOS DEL CENTRO" in b1:
         return "datos_centro"
 
     if "DATOS DEL ESTUDIANTE" in b1:
         return "datos_estudiante"
 
+    if title.startswith("ECAP"):
+        return "ecap"
+
+    if title.startswith("CF-") or "C.F." in row4:
+        return "cf"
+
     if "COMPETENCIA" in a2 and "NOMBRE" in b2:
         return "competencias"
 
     if "DÍAS TRABAJADOS" in d4 and "NOMBRE" in c6:
         return "asistencia_asignatura"
-
-    if "DÍAS TRABAJADOS" in d4 and "NOMBRE" in c6 and ws.max_column <= 50:
-        return "asistencia_print"
 
     if "COMPLETIVO" in a1 or "COMPLETIVO" in b1 or "COMPLETIVO" in d1:
         return "completivo"
@@ -70,12 +248,11 @@ def detect_sheet_kind_by_content(ws: Worksheet) -> str:
     return "general"
 
 
-def set_common_page_setup_letter(ws: Worksheet, landscape: bool) -> None:
+def set_common_page_setup_letter_portrait(ws: Worksheet) -> None:
     ws.page_setup.paperSize = ws.PAPERSIZE_LETTER
-    ws.page_setup.orientation = "landscape" if landscape else "portrait"
-
+    ws.page_setup.orientation = "portrait"
     ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 1 if landscape else 0
+    ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
 
     ws.page_margins.left = 0.20
@@ -89,49 +266,103 @@ def set_common_page_setup_letter(ws: Worksheet, landscape: bool) -> None:
     ws.print_options.verticalCentered = False
 
 
+def set_print_area_full_used_range(ws: Worksheet) -> str:
+    last_col_letter = safe_last_col_letter(ws)
+    ws.print_area = f"A1:{last_col_letter}{ws.max_row}"
+    return f"A1:{last_col_letter}{ws.max_row}"
+
+
 def configure_competency_sheet_for_print(ws: Worksheet) -> list[str]:
     actions: list[str] = []
 
-    set_common_page_setup_letter(ws, landscape=True)
-    actions.append("orientación horizontal en carta")
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
     actions.append("ajuste a 1 página de ancho")
 
     ws.column_dimensions["B"].hidden = True
     actions.append("columna B oculta para no imprimir nombres")
 
-    last_col_letter = safe_last_col_letter(ws)
-    ws.print_area = f"A1:{last_col_letter}{ws.max_row}"
-    actions.append(f"área de impresión definida: A1:{last_col_letter}{ws.max_row}")
+    print_area = set_print_area_full_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
 
     ws.print_title_rows = "$1:$4"
     actions.append("filas 1 a 4 repetidas como encabezado")
 
+    actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=30.0))
     return actions
 
 
-def configure_text_sheet_for_print(ws: Worksheet) -> list[str]:
+def configure_cf_sheet_for_print(ws: Worksheet) -> list[str]:
     actions: list[str] = []
-    set_common_page_setup_letter(ws, landscape=False)
-    actions.append("orientación vertical en carta")
 
-    last_col_letter = safe_last_col_letter(ws)
-    ws.print_area = f"A1:{last_col_letter}{ws.max_row}"
-    actions.append(f"área de impresión definida: A1:{last_col_letter}{ws.max_row}")
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
+    actions.append("ajuste a 1 página de ancho")
+
+    # CF: A=RNE, B=ID, C=No., D=Nombre
+    ws.column_dimensions["B"].hidden = True
+    ws.column_dimensions["D"].hidden = True
+    actions.append("columnas B y D ocultas para no imprimir ID ni nombre")
+
+    print_area = set_print_area_full_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
+
+    ws.print_title_rows = "$1:$6"
+    actions.append("filas 1 a 6 repetidas como encabezado")
+
+    actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=24.0))
     return actions
 
 
 def configure_attendance_sheet_for_print(ws: Worksheet) -> list[str]:
     actions: list[str] = []
-    set_common_page_setup_letter(ws, landscape=True)
-    actions.append("orientación horizontal en carta")
+
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
     actions.append("ajuste a 1 página de ancho")
 
-    last_col_letter = safe_last_col_letter(ws)
-    ws.print_area = f"A1:{last_col_letter}{ws.max_row}"
-    actions.append(f"área de impresión definida: A1:{last_col_letter}{ws.max_row}")
+    # Primer bloque
+    for col in ["A", "C", "AA", "AB", "AC", "AD"]:
+        ws.column_dimensions[col].hidden = True
+
+    # Segundo bloque
+    for col in ["AF", "BD", "BE", "BF", "BG"]:
+        ws.column_dimensions[col].hidden = True
+
+    actions.append("columnas ocultas en asistencia: ID, nombre, TA, %A, TE, %E")
+
+    print_area = set_print_area_full_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
 
     ws.print_title_rows = "$1:$6"
     actions.append("filas 1 a 6 repetidas como encabezado")
+
+    actions.extend(autosize_columns_by_content(ws, min_width=4.5, max_width=18.0))
+    return actions
+
+
+def configure_text_sheet_for_print(ws: Worksheet) -> list[str]:
+    actions: list[str] = []
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
+
+    print_area = set_print_area_full_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
+
+    actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=28.0))
+    return actions
+
+
+def configure_ecap_sheet_for_print(ws: Worksheet) -> list[str]:
+    actions: list[str] = []
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
+
+    print_area = set_print_area_full_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
+
+    actions.extend(complete_used_range_borders(ws))
+    actions.extend(autosize_columns_by_content(ws, min_width=12.0, max_width=42.0))
     return actions
 
 
@@ -145,10 +376,14 @@ def prepare_print_workbook(
     actions_log: list[SheetPrintAction] = []
     stop_detected = False
 
-    for ws in wb.worksheets:
-        sheet_name_upper = (ws.title or "").upper()
+    stop_tokens = ["REPORTE CALIFICACI"]
+    if stop_sheet_name:
+        stop_tokens.append(stop_sheet_name.upper())
 
-        if stop_sheet_name and stop_sheet_name.upper() in sheet_name_upper:
+    for ws in wb.worksheets:
+        title_upper = (ws.title or "").upper()
+
+        if any(token in title_upper for token in stop_tokens):
             stop_detected = True
 
         if stop_detected:
@@ -162,15 +397,22 @@ def prepare_print_workbook(
             continue
 
         kind = detect_sheet_kind_by_content(ws)
+        actions: list[str] = []
+
+        actions.extend(normalize_sheet_visual_style(ws))
 
         if kind == "competencias":
-            actions = configure_competency_sheet_for_print(ws)
-        elif kind in {"datos_centro", "datos_estudiante", "completivo", "extraordinario"}:
-            actions = configure_text_sheet_for_print(ws)
-        elif kind in {"asistencia_asignatura", "asistencia_print"}:
-            actions = configure_attendance_sheet_for_print(ws)
+            actions.extend(configure_competency_sheet_for_print(ws))
+        elif kind == "cf":
+            actions.extend(configure_cf_sheet_for_print(ws))
+        elif kind == "ecap":
+            actions.extend(configure_ecap_sheet_for_print(ws))
+        elif kind == "asistencia_asignatura":
+            actions.extend(configure_attendance_sheet_for_print(ws))
+        elif kind in {"datos_centro", "datos_estudiante", "completivo", "extraordinario", "general"}:
+            actions.extend(configure_text_sheet_for_print(ws))
         else:
-            actions = ["sin cambios automáticos en esta fase"]
+            actions.extend(configure_text_sheet_for_print(ws))
 
         actions_log.append(
             SheetPrintAction(

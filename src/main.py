@@ -30,15 +30,15 @@ def main() -> None:
     if not pdf_path.exists():
         raise FileNotFoundError(f"No se encontró el PDF de referencia: {pdf_path}")
 
-    output_workbook = settings.output_xlsx_dir / "2A_preparado_para_impresion.xlsx"
+    output_workbook = settings.output_xlsx_dir / "2A_preparado_para_impresion_v2.xlsx"
 
     actions_log = prepare_print_workbook(
         source_path=workbook_path,
         output_path=output_workbook,
-        stop_sheet_name="REPORTE CALIFICACI",
+        stop_sheet_name=settings.stop_sheet_name,
     )
 
-    actions_json = settings.temp_dir / "2A_preparado_para_impresion_log.json"
+    actions_json = settings.temp_dir / "2A_preparado_para_impresion_v2_log.json"
     actions_json.write_text(
         json.dumps(
             [
@@ -58,15 +58,15 @@ def main() -> None:
     print("\n=== COPIA DE TRABAJO GENERADA ===")
     print(f"Archivo generado: {output_workbook}")
 
-    print("\n=== PRIMERAS ACCIONES APLICADAS ===")
+    print("\n=== HOJAS CLAVE AJUSTADAS ===")
     shown = 0
     for item in actions_log:
-        if item.detected_kind in {"competencias", "asistencia_asignatura", "datos_estudiante", "datos_centro"}:
+        if item.detected_kind in {"asistencia_asignatura", "competencias", "cf", "ecap", "datos_estudiante", "datos_centro"}:
             print(f"- {item.sheet_name} | tipo={item.detected_kind}")
-            for action in item.action_taken:
+            for action in item.action_taken[:8]:
                 print(f"    * {action}")
             shown += 1
-            if shown >= 12:
+            if shown >= 14:
                 break
 
     print(f"\nLog generado: {actions_json}")
