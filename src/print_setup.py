@@ -44,11 +44,12 @@ def safe_last_col_letter(ws: Worksheet) -> str:
     max_col = max(1, ws.max_column or 1)
     return get_column_letter(max_col)
 
+
 def clear_conditional_formatting(ws: Worksheet) -> list[str]:
     """
     Elimina reglas de formato condicional.
-    Esto es importante porque Google Sheets suele volver a pintar
-    celdas en rojo aunque el fill y la fuente ya hayan sido cambiados.
+    Esto es importante porque Google Sheets / Excel online pueden
+    volver a pintar celdas en rojo aunque el fill y la fuente ya hayan sido cambiados.
     """
     removed = 0
 
@@ -69,8 +70,7 @@ def clear_conditional_formatting(ws: Worksheet) -> list[str]:
 
 def font_to_times_new_roman_black(original_font: Font) -> Font:
     """
-    Fuerza fuente Times New Roman 12 en negro,
-    sin depender del tipo previo de color.
+    Fuerza fuente Times New Roman 12 en negro.
     """
     font_copy = copy(original_font)
     font_copy.name = "Times New Roman"
@@ -93,14 +93,12 @@ def normalize_cell_visual_style(cell) -> tuple[bool, bool]:
     font_changed = False
     fill_changed = False
 
-    # Forzar fuente
     try:
         cell.font = font_to_times_new_roman_black(cell.font)
         font_changed = True
     except Exception:
         pass
 
-    # Forzar relleno blanco siempre que exista estilo de relleno
     try:
         fill = cell.fill
         fill_type = getattr(fill, "fill_type", None)
@@ -264,6 +262,95 @@ def set_print_area_full_used_range(ws: Worksheet) -> str:
     return f"A1:{last_col_letter}{ws.max_row}"
 
 
+def column_has_header_text(ws: Worksheet, col_idx: int, texts: set[str], max_header_row: int = 8) -> bool:
+    normalized_targets = {t.replace(" ", "") for t in texts}
+
+    for row_idx in range(1, min(ws.max_row, max_header_row) + 1):
+        value = ws.cell(row=row_idx, column=col_idx).value
+        text = cell_text(value)
+        compact = text.replace(" ", "")
+        if text in texts or compact in normalized_targets:
+            return True
+    return False
+
+
+def find_cf_attendance_columns(ws: Worksheet, max_header_row: int = 8) -> tuple[list[int], list[int]]:
+    """
+    Detecta en hojas CF las columnas del bloque ASISTENCIA.
+    Debe dejar visible solo la columna % ANUAL / %ANUAL.
+    """
+    attendance_cols: list[int] = []
+    annual_cols: list[int] = []
+
+    attendance_markers = {
+        "P1",
+        "P2",
+        "P3",
+        "P4",
+        "% ANUAL",
+        "%ANUAL",
+        "ASISTENCIA",
+    }
+
+    annual_markers = {
+        "% ANUAL",
+        "%ANUAL",
+    }
+
+    normalized_attendance = {m.replace(" ", "") for m in attendance_markers}
+    normalized_annual = {m.replace(" ", "") for m in annual_markers}
+
+    for col_idx in range(1, ws.max_column + 1):
+        matched_texts: set[str] = set()
+
+        for row_idx in range(1, min(ws.max_row, max_header_row) + 1):
+            value = ws.cell(row=row_idx, column=col_idx).value
+            text = cell_text(value)
+            compact = text.replace(" ", "")
+            if text:
+                matched_texts.add(text)
+                matched_texts.add(compact)
+
+        if matched_texts.intersection(attendance_markers.union(normalized_attendance)):
+            attendance_cols.append(col_idx)
+
+        if matched_texts.intersection(annual_markers.union(normalized_annual)):
+            annual_cols.append(col_idx)
+
+    return attendance_cols, annual_cols
+
+
+def hide_cf_attendance_details_except_annual(ws: Worksheet) -> list[str]:
+    """
+    En CF deja visible solo la columna % ANUAL del bloque de asistencia.
+    Mantiene visible el encabezado general ASISTENCIA porque está en celdas combinadas,
+    pero oculta las columnas P1, P2, P3 y P4.
+    """
+    actions: list[str] = []
+
+    attendance_cols, annual_cols = find_cf_attendance_columns(ws)
+
+    if not attendance_cols:
+        return ["no se detectó bloque de asistencia en hoja CF"]
+
+    if not annual_cols:
+        return ["se detectó bloque de asistencia, pero no se encontró columna % ANUAL"]
+
+    annual_set = set(annual_cols)
+    hidden_count = 0
+
+    for col_idx in attendance_cols:
+        if col_idx not in annual_set:
+            col_letter = get_column_letter(col_idx)
+            ws.column_dimensions[col_letter].hidden = True
+            hidden_count += 1
+
+    visible_letters = [get_column_letter(c) for c in annual_cols]
+    actions.append(f"bloque de asistencia depurado en CF: {hidden_count} columnas ocultas")
+    actions.append(f"columna(s) % ANUAL visibles: {', '.join(visible_letters)}")
+    return actions
+
+
 def configure_competency_sheet_for_print(ws: Worksheet) -> list[str]:
     actions: list[str] = []
 
@@ -294,6 +381,8 @@ def configure_cf_sheet_for_print(ws: Worksheet) -> list[str]:
     ws.column_dimensions["B"].hidden = True
     ws.column_dimensions["D"].hidden = True
     actions.append("columnas B y D ocultas para no imprimir ID ni nombre")
+
+    actions.extend(hide_cf_attendance_details_except_annual(ws))
 
     print_area = set_print_area_full_used_range(ws)
     actions.append(f"área de impresión definida: {print_area}")
