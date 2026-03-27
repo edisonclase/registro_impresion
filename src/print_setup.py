@@ -44,6 +44,28 @@ def safe_last_col_letter(ws: Worksheet) -> str:
     max_col = max(1, ws.max_column or 1)
     return get_column_letter(max_col)
 
+def clear_conditional_formatting(ws: Worksheet) -> list[str]:
+    """
+    Elimina reglas de formato condicional.
+    Esto es importante porque Google Sheets suele volver a pintar
+    celdas en rojo aunque el fill y la fuente ya hayan sido cambiados.
+    """
+    removed = 0
+
+    try:
+        removed = len(ws.conditional_formatting)
+    except Exception:
+        removed = 0
+
+    try:
+        ws.conditional_formatting._cf_rules.clear()
+    except Exception:
+        pass
+
+    if removed:
+        return [f"formato condicional eliminado: {removed} reglas"]
+    return ["sin formato condicional que eliminar"]
+
 
 def font_to_times_new_roman_black(original_font: Font) -> Font:
     """
@@ -366,6 +388,7 @@ def prepare_print_workbook(
         kind = detect_sheet_kind_by_content(ws)
         actions: list[str] = []
 
+        actions.extend(clear_conditional_formatting(ws))
         actions.extend(normalize_sheet_visual_style(ws))
 
         if kind == "competencias":
