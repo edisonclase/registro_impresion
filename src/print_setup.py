@@ -318,6 +318,257 @@ def complete_used_range_borders(ws: Worksheet) -> list[str]:
 
     return [f"bordes completos aplicados en rango usado: {applied} celdas"]
 
+def find_header_columns(
+    ws: Worksheet,
+    header_candidates: set[str],
+    max_header_row: int = 8,
+) -> list[int]:
+    """
+    Busca columnas por encabezado en las primeras filas.
+    Devuelve índices de columna.
+    """
+    found: list[int] = []
+    normalized_targets = {h.replace(" ", "") for h in header_candidates}
+
+    for col_idx in range(1, ws.max_column + 1):
+        for row_idx in range(1, min(ws.max_row, max_header_row) + 1):
+            text = cell_text(ws.cell(row=row_idx, column=col_idx).value)
+            compact = text.replace(" ", "")
+            if text in header_candidates or compact in normalized_targets:
+                found.append(col_idx)
+                break
+
+    return found
+
+
+def looks_like_subject_competency_sheet(ws: Worksheet, max_header_row: int = 8) -> bool:
+    """
+    Detecta hojas tipo asignatura/competencia por estructura,
+    no por el nombre de la pestaña.
+
+    Patrón esperado:
+    - existe columna NOMBRE / NOMBRES
+    - existen encabezados de períodos como P1/P2/P3/P4 o RP1/RP2...
+    """
+    name_headers = {"NOMBRE", "NOMBRES", "NOMBRE DEL ESTUDIANTE"}
+    period_headers = {"P1", "P2", "P3", "P4", "RP1", "RP2", "RP3", "RP4"}
+
+    name_cols = find_header_columns(ws, name_headers, max_header_row=max_header_row)
+    period_cols = find_header_columns(ws, period_headers, max_header_row=max_header_row)
+
+    # Para evitar falsos positivos:
+    # - debe existir nombre
+    # - deben existir varias columnas de período
+    # - la hoja debe tener tamaño razonable
+    return bool(name_cols) and len(period_cols) >= 4 and ws.max_row >= 10 and ws.max_column >= 8
+
+
+def hide_name_column_for_subject_sheet(ws: Worksheet, max_header_row: int = 8) -> list[str]:
+    """
+    Oculta la columna del nombre por encabezado.
+    Si no encuentra encabezado, usa B como fallback para no romper lo ya funcional.
+    """
+    actions: list[str] = []
+    name_headers = {"NOMBRE", "NOMBRES", "NOMBRE DEL ESTUDIANTE"}
+
+    name_cols = find_header_columns(ws, name_headers, max_header_row=max_header_row)
+
+    if name_cols:
+        hidden_letters: list[str] = []
+        for col_idx in name_cols:
+            col_letter = get_column_letter(col_idx)
+            ws.column_dimensions[col_letter].hidden = True
+            hidden_letters.append(col_letter)
+        actions.append(f"columna(s) de nombre ocultas por encabezado: {', '.join(hidden_letters)}")
+        return actions
+
+    ws.column_dimensions["B"].hidden = True
+    actions.append("columna B oculta como fallback para no imprimir nombres")
+    return actions
+
+
+def force_wrap_text_used_range(ws: Worksheet) -> list[str]:
+    """
+    Fuerza wrap_text dentro del rango usado.
+    Útil para CEILE y hojas con mucho texto.
+    """
+    changed = 0
+    last_row, last_col = get_used_range_visible_bounds(ws)
+
+    for row in ws.iter_rows(min_row=1, max_row=last_row, min_col=1, max_col=last_col):
+        for cell in row:
+            if cell is None:
+                continue
+            if cell.value in (None, ""):
+                continue
+
+            try:
+                alignment = copy(cell.alignment)
+                alignment.wrapText = True
+                cell.alignment = alignment
+                changed += 1
+            except Exception:
+                pass
+
+    return [f"wrap_text forzado en rango usado: {changed} celdas"]
+
+def looks_like_subject_score_layout(ws: Worksheet, max_header_row: int = 8) -> bool:
+    """
+    Detecta hojas tipo calificaciones por asignatura aunque no entren
+    por la detección anterior de competencias.
+
+    Señales:
+    - existe encabezado NOMBRE/NOMBRES
+    - existen varios encabezados de periodos P1/P2/P3/P4 o RP1/RP2...
+    """
+    name_headers = {"NOMBRE", "NOMBRES", "NOMBRE DEL ESTUDIANTE"}
+    period_headers = {"P1", "P2", "P3", "P4", "RP1", "RP2", "RP3", "RP4"}
+
+    name_cols = find_header_columns(ws, name_headers, max_header_row=max_header_row)
+    period_cols = find_header_columns(ws, period_headers, max_header_row=max_header_row)
+
+    return bool(name_cols) and len(period_cols) >= 4 and ws.max_row >= 10
+
+def hide_student_name_columns_by_header(ws: Worksheet, max_header_row: int = 8) -> list[str]:
+    """
+    Oculta columnas cuyo encabezado diga NOMBRE / NOMBRES.
+    No asume una letra fija; busca por encabezado.
+    """
+    hidden_letters: list[str] = []
+
+    target_headers = {"NOMBRE", "NOMBRES", "NOMBRE DEL ESTUDIANTE", "ESTUDIANTE"}
+
+    for col_idx in range(1, ws.max_column + 1):
+        for row_idx in range(1, min(ws.max_row, max_header_row) + 1):
+            text = cell_text(ws.cell(row=row_idx, column=col_idx).value)
+            if text in target_headers:
+                col_letter = get_column_letter(col_idx)
+                ws.column_dimensions[col_letter].hidden = True
+                hidden_letters.append(col_letter)
+                break
+
+    if hidden_letters:
+        return [f"columnas de nombre ocultas por encabezado: {', '.join(hidden_letters)}"]
+
+    return ["no se encontraron columnas de nombre por encabezado"]
+
+def apply_subject_name_hiding_fallback(ws: Worksheet) -> list[str]:
+    """
+    Corrección transversal:
+    si una hoja tiene estructura de calificaciones por asignatura,
+    ocultar la columna del nombre aunque no haya sido clasificada
+    explícitamente como 'competencias'.
+    """
+    if looks_like_subject_score_layout(ws):
+        return hide_name_column_for_subject_sheet(ws)
+
+    return ["sin corrección transversal de nombre por estructura"]
+
+def clamp_visible_column_widths(
+    ws: Worksheet,
+    *,
+    min_width: float = 6.5,
+    max_width: float = 18.0,
+) -> list[str]:
+    """
+    Limita el ancho de columnas visibles para que el PDF no se deforme.
+    Solo reduce columnas que se hayan ido demasiado anchas.
+    """
+    changed = 0
+
+    for col_idx in range(1, ws.max_column + 1):
+        if is_col_hidden(ws, col_idx):
+            continue
+
+        col_letter = get_column_letter(col_idx)
+        width = ws.column_dimensions[col_letter].width
+
+        if width is None:
+            continue
+
+        new_width = max(min_width, min(width, max_width))
+        if abs(new_width - width) > 0.1:
+            ws.column_dimensions[col_letter].width = new_width
+            changed += 1
+
+    return [f"ancho de columnas visibles limitado para PDF: {changed} columnas"]
+
+def configure_ce_sheet_for_print(ws: Worksheet) -> list[str]:
+    """
+    Hojas que comienzan con CE:
+    - ocultar nombres
+    - mantener impresión vertical
+    - ajuste conservador para PDF
+    - completar bordes del rango usado
+    """
+    actions: list[str] = []
+
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
+    actions.append("ajuste a 1 página de ancho")
+
+    actions.extend(hide_student_name_columns_by_header(ws))
+
+    print_area = set_print_area_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
+
+    ws.print_title_rows = "$1:$6"
+    actions.append("filas 1 a 6 repetidas como encabezado")
+
+    actions.extend(complete_used_range_borders(ws))
+    actions.extend(autosize_columns_by_content(ws, min_width=6.5, max_width=16.0))
+    actions.extend(clamp_visible_column_widths(ws, min_width=6.5, max_width=16.0))
+    actions.extend(
+        preserve_and_adjust_row_heights(
+            ws,
+            min_height=18.0,
+            wrapped_min_height=24.0,
+            rotated_min_height=42.0,
+            max_height=72.0,
+        )
+    )
+    return actions
+
+def configure_ceile_sheet_for_print(ws: Worksheet) -> list[str]:
+    """
+    Hojas CEILE:
+    - ocultar nombres
+    - ajustar ancho y alto al contenido con límites finos
+    - completar bordes
+    - forzar wrap_text para evitar cortes
+    """
+    actions: list[str] = []
+
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
+    actions.append("ajuste a 1 página de ancho")
+
+    actions.extend(hide_student_name_columns_by_header(ws))
+
+    print_area = set_print_area_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
+
+    ws.print_title_rows = "$1:$6"
+    actions.append("filas 1 a 6 repetidas como encabezado")
+
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(complete_used_range_borders(ws))
+
+    # más conservador en ancho, pero menos agresivo al cerrar
+    actions.extend(autosize_columns_by_content(ws, min_width=7.0, max_width=16.0))
+    actions.extend(clamp_visible_column_widths(ws, min_width=7.0, max_width=16.0))
+
+    actions.extend(
+        preserve_and_adjust_row_heights(
+            ws,
+            min_height=22.0,
+            wrapped_min_height=30.0,
+            rotated_min_height=50.0,
+            max_height=110.0,
+        )
+    )
+    return actions
+
 
 def detect_sheet_kind_by_content(ws: Worksheet) -> str:
     title = cell_text(ws.title)
@@ -346,6 +597,18 @@ def detect_sheet_kind_by_content(ws: Worksheet) -> str:
     if title.startswith("CF-") or "C.F." in row4:
         return "cf"
 
+    if title.startswith("CEILE"):
+        return "ceile"
+
+    if title.startswith("CE"):
+        return "ce"
+
+    # NUEVO: detectar hojas de asignaturas por estructura,
+    # aunque no se llamen LE, MAT, NAT, etc.
+    if looks_like_subject_competency_sheet(ws):
+        return "competencias"
+
+    # Se deja esta regla vieja por compatibilidad
     if "COMPETENCIA" in a2 and "NOMBRE" in b2:
         return "competencias"
 
@@ -452,8 +715,8 @@ def configure_competency_sheet_for_print(ws: Worksheet) -> list[str]:
     actions.append("orientación vertical en carta")
     actions.append("ajuste a 1 página de ancho")
 
-    ws.column_dimensions["B"].hidden = True
-    actions.append("columna B oculta para no imprimir nombres")
+    # NUEVO: ocultar nombre por encabezado, no por letra fija únicamente
+    actions.extend(hide_name_column_for_subject_sheet(ws))
 
     print_area = set_print_area_used_range(ws)
     actions.append(f"área de impresión definida: {print_area}")
@@ -618,6 +881,7 @@ def prepare_print_workbook(
 
         actions.extend(clear_conditional_formatting(ws))
         actions.extend(normalize_sheet_visual_style(ws))
+        actions.extend(apply_subject_name_hiding_fallback(ws))
 
         if kind == "competencias":
             actions.extend(configure_competency_sheet_for_print(ws))
@@ -625,6 +889,10 @@ def prepare_print_workbook(
             actions.extend(configure_cf_sheet_for_print(ws))
         elif kind == "ecap":
             actions.extend(configure_ecap_sheet_for_print(ws))
+        elif kind == "ceile":
+            actions.extend(configure_ceile_sheet_for_print(ws))
+        elif kind == "ce":
+            actions.extend(configure_ce_sheet_for_print(ws))
         elif kind == "asistencia_asignatura":
             actions.extend(configure_attendance_sheet_for_print(ws))
         else:
