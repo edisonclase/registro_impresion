@@ -26,7 +26,7 @@ def build_output_stem(workbook_filename: str) -> str:
     match = re.match(r"^([A-Za-z0-9]+)", base_name)
     prefix = match.group(1).upper() if match else "REGISTRO"
 
-    return f"{prefix}_preparado_para_impresion_v6b"
+    return f"{prefix}_preparado_para_impresion_v6c"
 
 
 def main() -> None:

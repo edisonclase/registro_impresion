@@ -429,6 +429,38 @@ def looks_like_subject_score_layout(ws: Worksheet, max_header_row: int = 8) -> b
 
     return bool(name_cols) and len(period_cols) >= 4 and ws.max_row >= 10
 
+def looks_like_subject_grade_sheet_fallback(ws: Worksheet) -> bool:
+    """
+    Detecta hojas tipo calificaciones por asignatura con una regla más simple y segura.
+
+    Patrón esperado:
+    - hoja de tamaño razonable
+    - columna B contiene nombres de estudiantes en varias filas
+    - existen encabezados de períodos como P1/P2/P3/P4 o RP1/RP2...
+    - no es una hoja ya manejada por otras reglas especiales
+    """
+    title = cell_text(ws.title)
+
+    if title.startswith(("ALE", "ALEI", "CF-", "ECAP", "CE", "DATOS")):
+        return False
+
+    period_headers = {"P1", "P2", "P3", "P4", "RP1", "RP2", "RP3", "RP4"}
+    period_cols = find_header_columns(ws, period_headers, max_header_row=8)
+
+    if len(period_cols) < 4:
+        return False
+
+    if ws.max_row < 10 or ws.max_column < 8:
+        return False
+
+    non_empty_b = 0
+    for row_idx in range(4, min(ws.max_row, 20) + 1):
+        value = ws.cell(row=row_idx, column=2).value
+        if value not in (None, ""):
+            non_empty_b += 1
+
+    return non_empty_b >= 4
+
 def hide_student_name_columns_by_header(ws: Worksheet, max_header_row: int = 8) -> list[str]:
     """
     Oculta columnas cuyo encabezado diga NOMBRE / NOMBRES.
@@ -455,12 +487,17 @@ def hide_student_name_columns_by_header(ws: Worksheet, max_header_row: int = 8) 
 def apply_subject_name_hiding_fallback(ws: Worksheet) -> list[str]:
     """
     Corrección transversal:
-    si una hoja tiene estructura de calificaciones por asignatura,
-    ocultar la columna del nombre aunque no haya sido clasificada
-    explícitamente como 'competencias'.
+    - si la hoja tiene estructura de calificaciones por asignatura,
+      ocultar la columna del nombre
+    - primero intenta por encabezado
+    - si no detecta por encabezado, usa fallback seguro sobre columna B
     """
     if looks_like_subject_score_layout(ws):
         return hide_name_column_for_subject_sheet(ws)
+
+    if looks_like_subject_grade_sheet_fallback(ws):
+        ws.column_dimensions["B"].hidden = True
+        return ["columna B oculta por fallback estructural de hoja de asignatura"]
 
     return ["sin corrección transversal de nombre por estructura"]
 
@@ -553,18 +590,15 @@ def configure_ceile_sheet_for_print(ws: Worksheet) -> list[str]:
 
     actions.extend(force_wrap_text_used_range(ws))
     actions.extend(complete_used_range_borders(ws))
-
-    # más conservador en ancho, pero menos agresivo al cerrar
     actions.extend(autosize_columns_by_content(ws, min_width=7.0, max_width=16.0))
     actions.extend(clamp_visible_column_widths(ws, min_width=7.0, max_width=16.0))
-
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
-            min_height=22.0,
-            wrapped_min_height=30.0,
-            rotated_min_height=50.0,
-            max_height=110.0,
+            min_height=24.0,
+            wrapped_min_height=34.0,
+            rotated_min_height=52.0,
+            max_height=130.0,
         )
     )
     return actions
