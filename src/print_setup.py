@@ -437,12 +437,40 @@ def hide_cf_attendance_details_except_annual(ws: Worksheet) -> list[str]:
             ws.column_dimensions[col_letter].hidden = True
             hidden_count += 1
 
-    # asegurar que N quede visible
     if ws.max_column >= ws["N1"].column:
         ws.column_dimensions["N"].hidden = False
         actions.append("columna N (% ANUAL) forzada visible")
 
     actions.append(f"bloque de asistencia CF ajustado manualmente: {hidden_count} columnas ocultas (J:M)")
+    return actions
+
+
+def configure_competency_sheet_for_print(ws: Worksheet) -> list[str]:
+    actions: list[str] = []
+
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
+    actions.append("ajuste a 1 página de ancho")
+
+    ws.column_dimensions["B"].hidden = True
+    actions.append("columna B oculta para no imprimir nombres")
+
+    print_area = set_print_area_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
+
+    ws.print_title_rows = "$1:$4"
+    actions.append("filas 1 a 4 repetidas como encabezado")
+
+    actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=30.0))
+    actions.extend(
+        preserve_and_adjust_row_heights(
+            ws,
+            min_height=18.0,
+            wrapped_min_height=24.0,
+            rotated_min_height=42.0,
+            max_height=96.0,
+        )
+    )
     return actions
 
 
