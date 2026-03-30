@@ -486,18 +486,34 @@ def hide_student_name_columns_by_header(ws: Worksheet, max_header_row: int = 8) 
 
 def apply_subject_name_hiding_fallback(ws: Worksheet) -> list[str]:
     """
-    Corrección transversal:
-    - si la hoja tiene estructura de calificaciones por asignatura,
-      ocultar la columna del nombre
-    - primero intenta por encabezado
-    - si no detecta por encabezado, usa fallback seguro sobre columna B
+    Corrección definitiva:
+    Oculta columna B si la hoja tiene estructura de lista de estudiantes,
+    sin depender de encabezados exactos.
     """
-    if looks_like_subject_score_layout(ws):
-        return hide_name_column_for_subject_sheet(ws)
+    title = cell_text(ws.title)
 
-    if looks_like_subject_grade_sheet_fallback(ws):
+    # NO tocar hojas ya controladas
+    if title.startswith(("ALE", "ALEI", "CF-", "ECAP", "CEILE", "CE", "DATOS")):
+        return ["sin corrección transversal de nombre por estructura"]
+
+    # detectar si columna B parece contener nombres
+    non_empty_b = 0
+    text_like_b = 0
+
+    for row_idx in range(4, min(ws.max_row, 25) + 1):
+        value = ws.cell(row=row_idx, column=2).value
+
+        if value not in (None, ""):
+            non_empty_b += 1
+
+            # si es texto largo → probablemente nombre
+            if isinstance(value, str) and len(value.strip()) > 5:
+                text_like_b += 1
+
+    # condición fuerte: hay muchos valores tipo nombre
+    if non_empty_b >= 5 and text_like_b >= 4:
         ws.column_dimensions["B"].hidden = True
-        return ["columna B oculta por fallback estructural de hoja de asignatura"]
+        return ["columna B oculta por detección directa de lista de estudiantes"]
 
     return ["sin corrección transversal de nombre por estructura"]
 
