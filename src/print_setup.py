@@ -412,6 +412,144 @@ def force_wrap_text_used_range(ws: Worksheet) -> list[str]:
 
     return [f"wrap_text forzado en rango usado: {changed} celdas"]
 
+def set_top_vertical_alignment_used_range(ws: Worksheet) -> list[str]:
+    """
+    Fuerza alineación vertical superior en el rango usado.
+    Ayuda mucho en hojas con texto largo.
+    """
+    changed = 0
+    last_row, last_col = get_used_range_visible_bounds(ws)
+
+    for row in ws.iter_rows(min_row=1, max_row=last_row, min_col=1, max_col=last_col):
+        for cell in row:
+            if cell is None or cell.value in (None, ""):
+                continue
+
+            try:
+                alignment = copy(cell.alignment)
+                alignment.vertical = "top"
+                cell.alignment = alignment
+                changed += 1
+            except Exception:
+                pass
+
+    return [f"alineación vertical superior aplicada: {changed} celdas"]
+
+def widen_text_heavy_columns(
+    ws: Worksheet,
+    *,
+    min_width: float = 10.0,
+    preferred_width: float = 14.0,
+    max_width: float = 20.0,
+    min_text_len: int = 40,
+) -> list[str]:
+    """
+    Ensancha un poco columnas con mucho texto visible.
+    Útil en CEILE y tablas descriptivas.
+    """
+    changed = 0
+
+    for col_idx in range(1, ws.max_column + 1):
+        if is_col_hidden(ws, col_idx):
+            continue
+
+        col_letter = get_column_letter(col_idx)
+        longest = 0
+
+        for row_idx in range(1, ws.max_row + 1):
+            value = ws.cell(row=row_idx, column=col_idx).value
+            if value in (None, ""):
+                continue
+            text = str(value).strip()
+            if text:
+                longest = max(longest, len(text))
+
+        if longest < min_text_len:
+            continue
+
+        current_width = ws.column_dimensions[col_letter].width
+        if current_width is None:
+            current_width = min_width
+
+        target = min(max(current_width, preferred_width), max_width)
+
+        if target > current_width + 0.1:
+            ws.column_dimensions[col_letter].width = target
+            changed += 1
+
+    return [f"columnas con texto denso ensanchadas: {changed} columnas"]
+
+def preserve_and_adjust_row_heights_text_heavy(
+    ws: Worksheet,
+    *,
+    min_height: float = 24.0,
+    wrapped_min_height: float = 36.0,
+    rotated_min_height: float = 52.0,
+    max_height: float = 150.0,
+) -> list[str]:
+    """
+    Variante más generosa para hojas con mucho texto.
+    """
+    return preserve_and_adjust_row_heights(
+        ws,
+        min_height=min_height,
+        wrapped_min_height=wrapped_min_height,
+        rotated_min_height=rotated_min_height,
+        max_height=max_height,
+    )
+    
+def looks_like_text_heavy_sheet(ws: Worksheet) -> bool:
+    """
+    Detecta hojas con mucho texto descriptivo.
+    """
+    title = cell_text(ws.title)
+
+    if title.startswith(("ALE", "ALEI", "CF-", "ECAP")):
+        return False
+
+    long_cells = 0
+    last_row, last_col = get_used_range_visible_bounds(ws)
+
+    for row_idx in range(1, min(last_row, 12) + 1):
+        for col_idx in range(1, min(last_col, 10) + 1):
+            value = ws.cell(row=row_idx, column=col_idx).value
+            if value in (None, ""):
+                continue
+            text = str(value).strip()
+            if len(text) >= 45:
+                long_cells += 1
+
+    return long_cells >= 2
+
+def configure_text_heavy_sheet_for_print(ws: Worksheet) -> list[str]:
+    """
+    Hojas con mucho texto: más legibilidad para PDF.
+    """
+    actions: list[str] = []
+
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
+
+    print_area = set_print_area_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
+
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
+    actions.extend(complete_used_range_borders(ws))
+    actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=18.0))
+    actions.extend(widen_text_heavy_columns(ws, min_width=10.0, preferred_width=14.0, max_width=20.0))
+    actions.extend(clamp_visible_column_widths(ws, min_width=8.5, max_width=20.0))
+    actions.extend(
+        preserve_and_adjust_row_heights_text_heavy(
+            ws,
+            min_height=24.0,
+            wrapped_min_height=36.0,
+            rotated_min_height=52.0,
+            max_height=150.0,
+        )
+    )
+    return actions
+
 def looks_like_subject_score_layout(ws: Worksheet, max_header_row: int = 8) -> bool:
     """
     Detecta hojas tipo calificaciones por asignatura aunque no entren
@@ -586,9 +724,9 @@ def configure_ceile_sheet_for_print(ws: Worksheet) -> list[str]:
     """
     Hojas CEILE:
     - ocultar nombres
-    - ajustar ancho y alto al contenido con límites finos
+    - mejorar legibilidad
     - completar bordes
-    - forzar wrap_text para evitar cortes
+    - forzar wrap_text
     """
     actions: list[str] = []
 
@@ -605,16 +743,18 @@ def configure_ceile_sheet_for_print(ws: Worksheet) -> list[str]:
     actions.append("filas 1 a 6 repetidas como encabezado")
 
     actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
     actions.extend(complete_used_range_borders(ws))
-    actions.extend(autosize_columns_by_content(ws, min_width=7.0, max_width=16.0))
-    actions.extend(clamp_visible_column_widths(ws, min_width=7.0, max_width=16.0))
+    actions.extend(autosize_columns_by_content(ws, min_width=8.0, max_width=18.0))
+    actions.extend(widen_text_heavy_columns(ws, min_width=10.0, preferred_width=15.0, max_width=20.0))
+    actions.extend(clamp_visible_column_widths(ws, min_width=8.0, max_width=20.0))
     actions.extend(
-        preserve_and_adjust_row_heights(
+        preserve_and_adjust_row_heights_text_heavy(
             ws,
-            min_height=24.0,
-            wrapped_min_height=34.0,
-            rotated_min_height=52.0,
-            max_height=130.0,
+            min_height=26.0,
+            wrapped_min_height=40.0,
+            rotated_min_height=54.0,
+            max_height=160.0,
         )
     )
     return actions
@@ -945,16 +1085,10 @@ def prepare_print_workbook(
             actions.extend(configure_ce_sheet_for_print(ws))
         elif kind == "asistencia_asignatura":
             actions.extend(configure_attendance_sheet_for_print(ws))
+        elif looks_like_text_heavy_sheet(ws):
+            actions.extend(configure_text_heavy_sheet_for_print(ws))
         else:
             actions.extend(configure_text_sheet_for_print(ws))
-
-        actions_log.append(
-            SheetPrintAction(
-                sheet_name=ws.title,
-                detected_kind=kind,
-                action_taken=actions,
-            )
-        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
