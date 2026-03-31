@@ -318,6 +318,7 @@ def complete_used_range_borders(ws: Worksheet) -> list[str]:
 
     return [f"bordes completos aplicados en rango usado: {applied} celdas"]
 
+
 def find_header_columns(
     ws: Worksheet,
     header_candidates: set[str],
@@ -356,10 +357,6 @@ def looks_like_subject_competency_sheet(ws: Worksheet, max_header_row: int = 8) 
     name_cols = find_header_columns(ws, name_headers, max_header_row=max_header_row)
     period_cols = find_header_columns(ws, period_headers, max_header_row=max_header_row)
 
-    # Para evitar falsos positivos:
-    # - debe existir nombre
-    # - deben existir varias columnas de período
-    # - la hoja debe tener tamaño razonable
     return bool(name_cols) and len(period_cols) >= 4 and ws.max_row >= 10 and ws.max_column >= 8
 
 
@@ -412,6 +409,7 @@ def force_wrap_text_used_range(ws: Worksheet) -> list[str]:
 
     return [f"wrap_text forzado en rango usado: {changed} celdas"]
 
+
 def set_top_vertical_alignment_used_range(ws: Worksheet) -> list[str]:
     """
     Fuerza alineación vertical superior en el rango usado.
@@ -434,6 +432,7 @@ def set_top_vertical_alignment_used_range(ws: Worksheet) -> list[str]:
                 pass
 
     return [f"alineación vertical superior aplicada: {changed} celdas"]
+
 
 def widen_text_heavy_columns(
     ws: Worksheet,
@@ -479,6 +478,7 @@ def widen_text_heavy_columns(
 
     return [f"columnas con texto denso ensanchadas: {changed} columnas"]
 
+
 def preserve_and_adjust_row_heights_text_heavy(
     ws: Worksheet,
     *,
@@ -497,7 +497,8 @@ def preserve_and_adjust_row_heights_text_heavy(
         rotated_min_height=rotated_min_height,
         max_height=max_height,
     )
-    
+
+
 def looks_like_text_heavy_sheet(ws: Worksheet) -> bool:
     """
     Detecta hojas con mucho texto descriptivo.
@@ -521,43 +522,11 @@ def looks_like_text_heavy_sheet(ws: Worksheet) -> bool:
 
     return long_cells >= 2
 
-def configure_text_heavy_sheet_for_print(ws: Worksheet) -> list[str]:
-    """
-    Hojas con mucho texto: más legibilidad para PDF.
-    """
-    actions: list[str] = []
-
-    set_common_page_setup_letter_portrait(ws)
-    actions.append("orientación vertical en carta")
-
-    print_area = set_print_area_used_range(ws)
-    actions.append(f"área de impresión definida: {print_area}")
-
-    actions.extend(force_wrap_text_used_range(ws))
-    actions.extend(set_top_vertical_alignment_used_range(ws))
-    actions.extend(complete_used_range_borders(ws))
-    actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=18.0))
-    actions.extend(widen_text_heavy_columns(ws, min_width=10.0, preferred_width=14.0, max_width=20.0))
-    actions.extend(clamp_visible_column_widths(ws, min_width=8.5, max_width=20.0))
-    actions.extend(
-        preserve_and_adjust_row_heights_text_heavy(
-            ws,
-            min_height=24.0,
-            wrapped_min_height=36.0,
-            rotated_min_height=52.0,
-            max_height=150.0,
-        )
-    )
-    return actions
 
 def looks_like_subject_score_layout(ws: Worksheet, max_header_row: int = 8) -> bool:
     """
     Detecta hojas tipo calificaciones por asignatura aunque no entren
     por la detección anterior de competencias.
-
-    Señales:
-    - existe encabezado NOMBRE/NOMBRES
-    - existen varios encabezados de periodos P1/P2/P3/P4 o RP1/RP2...
     """
     name_headers = {"NOMBRE", "NOMBRES", "NOMBRE DEL ESTUDIANTE"}
     period_headers = {"P1", "P2", "P3", "P4", "RP1", "RP2", "RP3", "RP4"}
@@ -567,15 +536,10 @@ def looks_like_subject_score_layout(ws: Worksheet, max_header_row: int = 8) -> b
 
     return bool(name_cols) and len(period_cols) >= 4 and ws.max_row >= 10
 
+
 def looks_like_subject_grade_sheet_fallback(ws: Worksheet) -> bool:
     """
     Detecta hojas tipo calificaciones por asignatura con una regla más simple y segura.
-
-    Patrón esperado:
-    - hoja de tamaño razonable
-    - columna B contiene nombres de estudiantes en varias filas
-    - existen encabezados de períodos como P1/P2/P3/P4 o RP1/RP2...
-    - no es una hoja ya manejada por otras reglas especiales
     """
     title = cell_text(ws.title)
 
@@ -598,6 +562,7 @@ def looks_like_subject_grade_sheet_fallback(ws: Worksheet) -> bool:
             non_empty_b += 1
 
     return non_empty_b >= 4
+
 
 def hide_student_name_columns_by_header(ws: Worksheet, max_header_row: int = 8) -> list[str]:
     """
@@ -622,6 +587,7 @@ def hide_student_name_columns_by_header(ws: Worksheet, max_header_row: int = 8) 
 
     return ["no se encontraron columnas de nombre por encabezado"]
 
+
 def apply_subject_name_hiding_fallback(ws: Worksheet) -> list[str]:
     """
     Corrección definitiva:
@@ -630,11 +596,9 @@ def apply_subject_name_hiding_fallback(ws: Worksheet) -> list[str]:
     """
     title = cell_text(ws.title)
 
-    # NO tocar hojas ya controladas
     if title.startswith(("ALE", "ALEI", "CF-", "ECAP", "CEILE", "CE", "DATOS")):
         return ["sin corrección transversal de nombre por estructura"]
 
-    # detectar si columna B parece contener nombres
     non_empty_b = 0
     text_like_b = 0
 
@@ -644,16 +608,15 @@ def apply_subject_name_hiding_fallback(ws: Worksheet) -> list[str]:
         if value not in (None, ""):
             non_empty_b += 1
 
-            # si es texto largo → probablemente nombre
             if isinstance(value, str) and len(value.strip()) > 5:
                 text_like_b += 1
 
-    # condición fuerte: hay muchos valores tipo nombre
     if non_empty_b >= 5 and text_like_b >= 4:
         ws.column_dimensions["B"].hidden = True
         return ["columna B oculta por detección directa de lista de estudiantes"]
 
     return ["sin corrección transversal de nombre por estructura"]
+
 
 def clamp_visible_column_widths(
     ws: Worksheet,
@@ -684,21 +647,102 @@ def clamp_visible_column_widths(
 
     return [f"ancho de columnas visibles limitado para PDF: {changed} columnas"]
 
-def configure_ce_sheet_for_print(ws: Worksheet) -> list[str]:
+
+def set_common_page_setup_letter_portrait(ws: Worksheet) -> None:
+    ws.page_setup.paperSize = ws.PAPERSIZE_LETTER
+    ws.page_setup.orientation = "portrait"
+
+    # Regla general: una hoja por tabla
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+    ws.page_margins.left = 0.15
+    ws.page_margins.right = 0.15
+    ws.page_margins.top = 0.22
+    ws.page_margins.bottom = 0.28
+    ws.page_margins.header = 0.12
+    ws.page_margins.footer = 0.18
+
+    ws.print_options.horizontalCentered = True
+    ws.print_options.verticalCentered = False
+
+
+def apply_page_numbering(ws: Worksheet) -> list[str]:
+    ws.oddFooter.center.text = "Página &P"
+    ws.evenFooter.center.text = "Página &P"
+    return ['pie de página configurado: "Página &P"']
+
+
+def expand_to_page_width(
+    ws: Worksheet,
+    *,
+    min_width: float = 6.5,
+    max_width: float = 26.0,
+    preferred_text_width: float = 18.0,
+    long_text_threshold: int = 30,
+) -> list[str]:
     """
-    Hojas que comienzan con CE:
-    - ocultar nombres
-    - mantener impresión vertical
-    - ajuste conservador para PDF
-    - completar bordes del rango usado
+    Hace que la tabla use mejor el ancho útil de la hoja.
+    Amplía columnas visibles con texto, sin romper la impresión.
+    """
+    changed = 0
+
+    for col_idx in range(1, ws.max_column + 1):
+        if is_col_hidden(ws, col_idx):
+            continue
+
+        col_letter = get_column_letter(col_idx)
+        current_width = ws.column_dimensions[col_letter].width or 8.43
+
+        longest = 0
+        populated = 0
+
+        for row_idx in range(1, ws.max_row + 1):
+            value = ws.cell(row=row_idx, column=col_idx).value
+            if value in (None, ""):
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            populated += 1
+            longest = max(longest, len(text))
+
+        if populated == 0:
+            continue
+
+        target = current_width
+
+        if longest >= long_text_threshold:
+            target = max(target, preferred_text_width)
+        elif longest >= 12:
+            target = max(target, min(preferred_text_width - 2, max_width))
+
+        target = max(min_width, min(target, max_width))
+
+        if abs(target - current_width) > 0.1:
+            ws.column_dimensions[col_letter].width = target
+            changed += 1
+
+    return [f"tabla expandida para ocupar mejor la hoja: {changed} columnas ajustadas"]
+
+
+def configure_data_student_sheet_for_print(ws: Worksheet) -> list[str]:
+    """
+    Excepción oficial:
+    Datos del estudiante puede dividirse en 2 páginas.
     """
     actions: list[str] = []
 
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
-    actions.append("ajuste a 1 página de ancho")
 
-    actions.extend(hide_student_name_columns_by_header(ws))
+    actions.extend(apply_page_numbering(ws))
+
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 2
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    actions.append("datos del estudiante permitido hasta 2 páginas")
 
     print_area = set_print_area_used_range(ws)
     actions.append(f"área de impresión definida: {print_area}")
@@ -707,129 +751,20 @@ def configure_ce_sheet_for_print(ws: Worksheet) -> list[str]:
     actions.append("filas 1 a 6 repetidas como encabezado")
 
     actions.extend(complete_used_range_borders(ws))
-    actions.extend(autosize_columns_by_content(ws, min_width=6.5, max_width=16.0))
-    actions.extend(clamp_visible_column_widths(ws, min_width=6.5, max_width=16.0))
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
+    actions.extend(autosize_columns_by_content(ws, min_width=6.5, max_width=18.0))
+    actions.extend(expand_to_page_width(ws, min_width=6.5, max_width=18.0, preferred_text_width=14.0))
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
             min_height=18.0,
             wrapped_min_height=24.0,
-            rotated_min_height=42.0,
-            max_height=72.0,
+            rotated_min_height=44.0,
+            max_height=96.0,
         )
     )
     return actions
-
-def configure_ceile_sheet_for_print(ws: Worksheet) -> list[str]:
-    """
-    Hojas CEILE:
-    - ocultar nombres
-    - mejorar legibilidad
-    - completar bordes
-    - forzar wrap_text
-    """
-    actions: list[str] = []
-
-    set_common_page_setup_letter_portrait(ws)
-    actions.append("orientación vertical en carta")
-    actions.append("ajuste a 1 página de ancho")
-
-    actions.extend(hide_student_name_columns_by_header(ws))
-
-    print_area = set_print_area_used_range(ws)
-    actions.append(f"área de impresión definida: {print_area}")
-
-    ws.print_title_rows = "$1:$6"
-    actions.append("filas 1 a 6 repetidas como encabezado")
-
-    actions.extend(force_wrap_text_used_range(ws))
-    actions.extend(set_top_vertical_alignment_used_range(ws))
-    actions.extend(complete_used_range_borders(ws))
-    actions.extend(autosize_columns_by_content(ws, min_width=8.0, max_width=18.0))
-    actions.extend(widen_text_heavy_columns(ws, min_width=10.0, preferred_width=15.0, max_width=20.0))
-    actions.extend(clamp_visible_column_widths(ws, min_width=8.0, max_width=20.0))
-    actions.extend(
-        preserve_and_adjust_row_heights_text_heavy(
-            ws,
-            min_height=26.0,
-            wrapped_min_height=40.0,
-            rotated_min_height=54.0,
-            max_height=160.0,
-        )
-    )
-    return actions
-
-
-def detect_sheet_kind_by_content(ws: Worksheet) -> str:
-    title = cell_text(ws.title)
-
-    a1 = cell_text(ws["A1"].value)
-    b1 = cell_text(ws["B1"].value)
-    d1 = cell_text(ws["D1"].value)
-
-    a2 = cell_text(ws["A2"].value)
-    b2 = cell_text(ws["B2"].value)
-
-    d4 = cell_text(ws["D4"].value)
-    c6 = cell_text(ws["C6"].value)
-
-    row4 = " | ".join(cell_text(ws.cell(4, c).value) for c in range(1, min(ws.max_column, 12) + 1))
-
-    if "DATOS DEL CENTRO" in b1:
-        return "datos_centro"
-
-    if "DATOS DEL ESTUDIANTE" in b1:
-        return "datos_estudiante"
-
-    if title.startswith("ECAP"):
-        return "ecap"
-
-    if title.startswith("CF-") or "C.F." in row4:
-        return "cf"
-
-    if title.startswith("CEILE"):
-        return "ceile"
-
-    if title.startswith("CE"):
-        return "ce"
-
-    # NUEVO: detectar hojas de asignaturas por estructura,
-    # aunque no se llamen LE, MAT, NAT, etc.
-    if looks_like_subject_competency_sheet(ws):
-        return "competencias"
-
-    # Se deja esta regla vieja por compatibilidad
-    if "COMPETENCIA" in a2 and "NOMBRE" in b2:
-        return "competencias"
-
-    if "DÍAS TRABAJADOS" in d4 and "NOMBRE" in c6:
-        return "asistencia_asignatura"
-
-    if "COMPLETIVO" in a1 or "COMPLETIVO" in b1 or "COMPLETIVO" in d1:
-        return "completivo"
-
-    if "EXTRAORDINARIO" in a1 or "EXTRAORDINARIO" in b1 or "EXTRAORDINARIO" in d1:
-        return "extraordinario"
-
-    return "general"
-
-
-def set_common_page_setup_letter_portrait(ws: Worksheet) -> None:
-    ws.page_setup.paperSize = ws.PAPERSIZE_LETTER
-    ws.page_setup.orientation = "portrait"
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
-
-    ws.page_margins.left = 0.20
-    ws.page_margins.right = 0.20
-    ws.page_margins.top = 0.30
-    ws.page_margins.bottom = 0.30
-    ws.page_margins.header = 0.15
-    ws.page_margins.footer = 0.15
-
-    ws.print_options.horizontalCentered = True
-    ws.print_options.verticalCentered = False
 
 
 def find_cf_attendance_columns(ws: Worksheet, max_header_row: int = 8) -> tuple[list[int], list[int]]:
@@ -903,9 +838,9 @@ def configure_competency_sheet_for_print(ws: Worksheet) -> list[str]:
 
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
-    actions.append("ajuste a 1 página de ancho")
+    actions.append("ajuste a 1 página por tabla")
 
-    # NUEVO: ocultar nombre por encabezado, no por letra fija únicamente
+    actions.extend(apply_page_numbering(ws))
     actions.extend(hide_name_column_for_subject_sheet(ws))
 
     print_area = set_print_area_used_range(ws)
@@ -914,14 +849,18 @@ def configure_competency_sheet_for_print(ws: Worksheet) -> list[str]:
     ws.print_title_rows = "$1:$4"
     actions.append("filas 1 a 4 repetidas como encabezado")
 
+    actions.extend(complete_used_range_borders(ws))
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
     actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=30.0))
+    actions.extend(expand_to_page_width(ws, min_width=8.5, max_width=24.0, preferred_text_width=18.0))
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
-            min_height=18.0,
-            wrapped_min_height=24.0,
+            min_height=20.0,
+            wrapped_min_height=28.0,
             rotated_min_height=42.0,
-            max_height=96.0,
+            max_height=110.0,
         )
     )
     return actions
@@ -932,7 +871,9 @@ def configure_cf_sheet_for_print(ws: Worksheet) -> list[str]:
 
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
-    actions.append("ajuste a 1 página de ancho")
+    actions.append("ajuste a 1 página por tabla")
+
+    actions.extend(apply_page_numbering(ws))
 
     ws.column_dimensions["B"].hidden = True
     ws.column_dimensions["D"].hidden = True
@@ -946,7 +887,11 @@ def configure_cf_sheet_for_print(ws: Worksheet) -> list[str]:
     ws.print_title_rows = "$1:$6"
     actions.append("filas 1 a 6 repetidas como encabezado")
 
+    actions.extend(complete_used_range_borders(ws))
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
     actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=24.0))
+    actions.extend(expand_to_page_width(ws, min_width=6.5, max_width=18.0, preferred_text_width=12.0))
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
@@ -964,7 +909,9 @@ def configure_attendance_sheet_for_print(ws: Worksheet) -> list[str]:
 
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
-    actions.append("ajuste a 1 página de ancho")
+    actions.append("ajuste a 1 página por tabla")
+
+    actions.extend(apply_page_numbering(ws))
 
     for col in ["A", "C", "AA", "AB", "AC", "AD"]:
         ws.column_dimensions[col].hidden = True
@@ -980,7 +927,11 @@ def configure_attendance_sheet_for_print(ws: Worksheet) -> list[str]:
     ws.print_title_rows = "$1:$6"
     actions.append("filas 1 a 6 repetidas como encabezado")
 
+    actions.extend(complete_used_range_borders(ws))
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
     actions.extend(autosize_columns_by_content(ws, min_width=4.5, max_width=18.0))
+    actions.extend(expand_to_page_width(ws, min_width=4.5, max_width=12.0, preferred_text_width=8.0))
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
@@ -995,13 +946,21 @@ def configure_attendance_sheet_for_print(ws: Worksheet) -> list[str]:
 
 def configure_text_sheet_for_print(ws: Worksheet) -> list[str]:
     actions: list[str] = []
+
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
+    actions.append("ajuste a 1 página por tabla")
+
+    actions.extend(apply_page_numbering(ws))
 
     print_area = set_print_area_used_range(ws)
     actions.append(f"área de impresión definida: {print_area}")
 
+    actions.extend(complete_used_range_borders(ws))
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
     actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=28.0))
+    actions.extend(expand_to_page_width(ws, min_width=8.5, max_width=22.0, preferred_text_width=16.0))
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
@@ -1016,14 +975,21 @@ def configure_text_sheet_for_print(ws: Worksheet) -> list[str]:
 
 def configure_ecap_sheet_for_print(ws: Worksheet) -> list[str]:
     actions: list[str] = []
+
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
+    actions.append("ajuste a 1 página por tabla")
+
+    actions.extend(apply_page_numbering(ws))
 
     print_area = set_print_area_used_range(ws)
     actions.append(f"área de impresión definida: {print_area}")
 
     actions.extend(complete_used_range_borders(ws))
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
     actions.extend(autosize_columns_by_content(ws, min_width=12.0, max_width=42.0))
+    actions.extend(expand_to_page_width(ws, min_width=10.0, max_width=24.0, preferred_text_width=18.0))
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
@@ -1034,6 +1000,174 @@ def configure_ecap_sheet_for_print(ws: Worksheet) -> list[str]:
         )
     )
     return actions
+
+
+def configure_ce_sheet_for_print(ws: Worksheet) -> list[str]:
+    """
+    Hojas que comienzan con CE:
+    - ocultar nombres
+    - mantener impresión vertical
+    - ajuste conservador para PDF
+    - completar bordes del rango usado
+    """
+    actions: list[str] = []
+
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
+    actions.append("ajuste a 1 página por tabla")
+
+    actions.extend(apply_page_numbering(ws))
+    actions.extend(hide_student_name_columns_by_header(ws))
+
+    print_area = set_print_area_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
+
+    ws.print_title_rows = "$1:$6"
+    actions.append("filas 1 a 6 repetidas como encabezado")
+
+    actions.extend(complete_used_range_borders(ws))
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
+    actions.extend(autosize_columns_by_content(ws, min_width=6.5, max_width=16.0))
+    actions.extend(expand_to_page_width(ws, min_width=8.0, max_width=22.0, preferred_text_width=16.0))
+    actions.extend(clamp_visible_column_widths(ws, min_width=6.5, max_width=22.0))
+    actions.extend(
+        preserve_and_adjust_row_heights(
+            ws,
+            min_height=18.0,
+            wrapped_min_height=24.0,
+            rotated_min_height=42.0,
+            max_height=72.0,
+        )
+    )
+    return actions
+
+
+def configure_ceile_sheet_for_print(ws: Worksheet) -> list[str]:
+    """
+    Hojas CEILE:
+    - ocultar nombres
+    - mejorar legibilidad
+    - completar bordes
+    - forzar wrap_text
+    """
+    actions: list[str] = []
+
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
+    actions.append("ajuste a 1 página por tabla")
+
+    actions.extend(apply_page_numbering(ws))
+    actions.extend(hide_student_name_columns_by_header(ws))
+
+    print_area = set_print_area_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
+
+    ws.print_title_rows = "$1:$6"
+    actions.append("filas 1 a 6 repetidas como encabezado")
+
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
+    actions.extend(complete_used_range_borders(ws))
+    actions.extend(autosize_columns_by_content(ws, min_width=8.0, max_width=18.0))
+    actions.extend(widen_text_heavy_columns(ws, min_width=10.0, preferred_width=15.0, max_width=20.0))
+    actions.extend(expand_to_page_width(ws, min_width=8.0, max_width=26.0, preferred_text_width=20.0))
+    actions.extend(clamp_visible_column_widths(ws, min_width=8.0, max_width=26.0))
+    actions.extend(
+        preserve_and_adjust_row_heights_text_heavy(
+            ws,
+            min_height=26.0,
+            wrapped_min_height=40.0,
+            rotated_min_height=54.0,
+            max_height=160.0,
+        )
+    )
+    return actions
+
+
+def configure_text_heavy_sheet_for_print(ws: Worksheet) -> list[str]:
+    """
+    Hojas con mucho texto: más legibilidad para PDF.
+    """
+    actions: list[str] = []
+
+    set_common_page_setup_letter_portrait(ws)
+    actions.append("orientación vertical en carta")
+    actions.append("ajuste a 1 página por tabla")
+
+    actions.extend(apply_page_numbering(ws))
+
+    print_area = set_print_area_used_range(ws)
+    actions.append(f"área de impresión definida: {print_area}")
+
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
+    actions.extend(complete_used_range_borders(ws))
+    actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=18.0))
+    actions.extend(widen_text_heavy_columns(ws, min_width=10.0, preferred_width=14.0, max_width=20.0))
+    actions.extend(expand_to_page_width(ws, min_width=8.5, max_width=24.0, preferred_text_width=18.0))
+    actions.extend(clamp_visible_column_widths(ws, min_width=8.5, max_width=24.0))
+    actions.extend(
+        preserve_and_adjust_row_heights_text_heavy(
+            ws,
+            min_height=24.0,
+            wrapped_min_height=36.0,
+            rotated_min_height=52.0,
+            max_height=150.0,
+        )
+    )
+    return actions
+
+
+def detect_sheet_kind_by_content(ws: Worksheet) -> str:
+    title = cell_text(ws.title)
+
+    a1 = cell_text(ws["A1"].value)
+    b1 = cell_text(ws["B1"].value)
+    d1 = cell_text(ws["D1"].value)
+
+    a2 = cell_text(ws["A2"].value)
+    b2 = cell_text(ws["B2"].value)
+
+    d4 = cell_text(ws["D4"].value)
+    c6 = cell_text(ws["C6"].value)
+
+    row4 = " | ".join(cell_text(ws.cell(4, c).value) for c in range(1, min(ws.max_column, 12) + 1))
+
+    if "DATOS DEL CENTRO" in b1:
+        return "datos_centro"
+
+    if "DATOS DEL ESTUDIANTE" in b1:
+        return "datos_estudiante"
+
+    if title.startswith("ECAP"):
+        return "ecap"
+
+    if title.startswith("CF-") or "C.F." in row4:
+        return "cf"
+
+    if title.startswith("CEILE"):
+        return "ceile"
+
+    if title.startswith("CE"):
+        return "ce"
+
+    if looks_like_subject_competency_sheet(ws):
+        return "competencias"
+
+    if "COMPETENCIA" in a2 and "NOMBRE" in b2:
+        return "competencias"
+
+    if "DÍAS TRABAJADOS" in d4 and "NOMBRE" in c6:
+        return "asistencia_asignatura"
+
+    if "COMPLETIVO" in a1 or "COMPLETIVO" in b1 or "COMPLETIVO" in d1:
+        return "completivo"
+
+    if "EXTRAORDINARIO" in a1 or "EXTRAORDINARIO" in b1 or "EXTRAORDINARIO" in d1:
+        return "extraordinario"
+
+    return "general"
 
 
 def prepare_print_workbook(
@@ -1073,7 +1207,9 @@ def prepare_print_workbook(
         actions.extend(normalize_sheet_visual_style(ws))
         actions.extend(apply_subject_name_hiding_fallback(ws))
 
-        if kind == "competencias":
+        if kind == "datos_estudiante":
+            actions.extend(configure_data_student_sheet_for_print(ws))
+        elif kind == "competencias":
             actions.extend(configure_competency_sheet_for_print(ws))
         elif kind == "cf":
             actions.extend(configure_cf_sheet_for_print(ws))
@@ -1089,6 +1225,14 @@ def prepare_print_workbook(
             actions.extend(configure_text_heavy_sheet_for_print(ws))
         else:
             actions.extend(configure_text_sheet_for_print(ws))
+
+        actions_log.append(
+            SheetPrintAction(
+                sheet_name=ws.title,
+                detected_kind=kind,
+                action_taken=actions,
+            )
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
