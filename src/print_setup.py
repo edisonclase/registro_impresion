@@ -651,18 +651,16 @@ def clamp_visible_column_widths(
 def set_common_page_setup_letter_portrait(ws: Worksheet) -> None:
     ws.page_setup.paperSize = ws.PAPERSIZE_LETTER
     ws.page_setup.orientation = "portrait"
-
-    # Regla general: una hoja por tabla
     ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 1
+    ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
 
-    ws.page_margins.left = 0.15
-    ws.page_margins.right = 0.15
-    ws.page_margins.top = 0.22
-    ws.page_margins.bottom = 0.28
-    ws.page_margins.header = 0.12
-    ws.page_margins.footer = 0.18
+    ws.page_margins.left = 0.20
+    ws.page_margins.right = 0.20
+    ws.page_margins.top = 0.30
+    ws.page_margins.bottom = 0.30
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.15
 
     ws.print_options.horizontalCentered = True
     ws.print_options.verticalCentered = False
@@ -838,7 +836,7 @@ def configure_competency_sheet_for_print(ws: Worksheet) -> list[str]:
 
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
-    actions.append("ajuste a 1 página por tabla")
+    actions.append("ajuste a 1 página de ancho")
 
     actions.extend(apply_page_numbering(ws))
     actions.extend(hide_name_column_for_subject_sheet(ws))
@@ -849,18 +847,14 @@ def configure_competency_sheet_for_print(ws: Worksheet) -> list[str]:
     ws.print_title_rows = "$1:$4"
     actions.append("filas 1 a 4 repetidas como encabezado")
 
-    actions.extend(complete_used_range_borders(ws))
-    actions.extend(force_wrap_text_used_range(ws))
-    actions.extend(set_top_vertical_alignment_used_range(ws))
     actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=30.0))
-    actions.extend(expand_to_page_width(ws, min_width=8.5, max_width=24.0, preferred_text_width=18.0))
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
-            min_height=20.0,
-            wrapped_min_height=28.0,
+            min_height=18.0,
+            wrapped_min_height=24.0,
             rotated_min_height=42.0,
-            max_height=110.0,
+            max_height=96.0,
         )
     )
     return actions
@@ -871,7 +865,7 @@ def configure_cf_sheet_for_print(ws: Worksheet) -> list[str]:
 
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
-    actions.append("ajuste a 1 página por tabla")
+    actions.append("ajuste a 1 página de ancho")
 
     actions.extend(apply_page_numbering(ws))
 
@@ -887,11 +881,7 @@ def configure_cf_sheet_for_print(ws: Worksheet) -> list[str]:
     ws.print_title_rows = "$1:$6"
     actions.append("filas 1 a 6 repetidas como encabezado")
 
-    actions.extend(complete_used_range_borders(ws))
-    actions.extend(force_wrap_text_used_range(ws))
-    actions.extend(set_top_vertical_alignment_used_range(ws))
     actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=24.0))
-    actions.extend(expand_to_page_width(ws, min_width=6.5, max_width=18.0, preferred_text_width=12.0))
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
@@ -909,7 +899,7 @@ def configure_attendance_sheet_for_print(ws: Worksheet) -> list[str]:
 
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
-    actions.append("ajuste a 1 página por tabla")
+    actions.append("ajuste a 1 página de ancho")
 
     actions.extend(apply_page_numbering(ws))
 
@@ -927,11 +917,7 @@ def configure_attendance_sheet_for_print(ws: Worksheet) -> list[str]:
     ws.print_title_rows = "$1:$6"
     actions.append("filas 1 a 6 repetidas como encabezado")
 
-    actions.extend(complete_used_range_borders(ws))
-    actions.extend(force_wrap_text_used_range(ws))
-    actions.extend(set_top_vertical_alignment_used_range(ws))
     actions.extend(autosize_columns_by_content(ws, min_width=4.5, max_width=18.0))
-    actions.extend(expand_to_page_width(ws, min_width=4.5, max_width=12.0, preferred_text_width=8.0))
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
@@ -949,18 +935,13 @@ def configure_text_sheet_for_print(ws: Worksheet) -> list[str]:
 
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
-    actions.append("ajuste a 1 página por tabla")
 
     actions.extend(apply_page_numbering(ws))
 
     print_area = set_print_area_used_range(ws)
     actions.append(f"área de impresión definida: {print_area}")
 
-    actions.extend(complete_used_range_borders(ws))
-    actions.extend(force_wrap_text_used_range(ws))
-    actions.extend(set_top_vertical_alignment_used_range(ws))
     actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=28.0))
-    actions.extend(expand_to_page_width(ws, min_width=8.5, max_width=22.0, preferred_text_width=16.0))
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
