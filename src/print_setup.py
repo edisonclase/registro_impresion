@@ -847,14 +847,19 @@ def configure_competency_sheet_for_print(ws: Worksheet) -> list[str]:
     ws.print_title_rows = "$1:$4"
     actions.append("filas 1 a 4 repetidas como encabezado")
 
-    actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=30.0))
+    # Mantenerlo estable, pero con más aprovechamiento horizontal
+    actions.extend(force_wrap_text_used_range(ws))
+    actions.extend(set_top_vertical_alignment_used_range(ws))
+    actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=26.0))
+    actions.extend(expand_to_page_width(ws, min_width=8.5, max_width=24.0, preferred_text_width=18.0))
+    actions.extend(clamp_visible_column_widths(ws, min_width=8.5, max_width=24.0))
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
-            min_height=18.0,
-            wrapped_min_height=24.0,
+            min_height=20.0,
+            wrapped_min_height=28.0,
             rotated_min_height=42.0,
-            max_height=96.0,
+            max_height=110.0,
         )
     )
     return actions
@@ -935,13 +940,27 @@ def configure_text_sheet_for_print(ws: Worksheet) -> list[str]:
 
     set_common_page_setup_letter_portrait(ws)
     actions.append("orientación vertical en carta")
+    actions.append("ajuste a 1 página de ancho")
 
     actions.extend(apply_page_numbering(ws))
 
     print_area = set_print_area_used_range(ws)
     actions.append(f"área de impresión definida: {print_area}")
 
-    actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=28.0))
+    last_row, last_col = get_used_range_visible_bounds(ws)
+
+    # Solo para hojas generales pequeñas/medianas:
+    # aquí sí conviene completar bordes y ocupar más la hoja
+    if last_col <= 10:
+        actions.extend(complete_used_range_borders(ws))
+        actions.extend(force_wrap_text_used_range(ws))
+        actions.extend(set_top_vertical_alignment_used_range(ws))
+        actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=22.0))
+        actions.extend(expand_to_page_width(ws, min_width=8.5, max_width=22.0, preferred_text_width=16.0))
+        actions.extend(clamp_visible_column_widths(ws, min_width=8.5, max_width=22.0))
+    else:
+        actions.extend(autosize_columns_by_content(ws, min_width=8.5, max_width=28.0))
+
     actions.extend(
         preserve_and_adjust_row_heights(
             ws,
